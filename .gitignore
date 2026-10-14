@@ -1,5 +1,8 @@
 /target
+/.rune/
+/Rune.lock.bin
 **/*.rs.bk
 *.orig
 .DS_Store
 Thumbs.db
+.rune
