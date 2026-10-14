@@ -1,0 +1,65 @@
+name: Bug Report
+description: Report a build failure, container issue, linker error, or unexpected behavior
+labels: ["bug", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for filing a bug report! Before opening an issue, please run `hyprcross doctor` to check your local environment.
+
+  - type: input
+    id: version
+    attributes:
+      label: Hyprcross Version
+      description: What version of hyprcross are you running? (Run `hyprcross --version`)
+      placeholder: e.g. 0.1.0
+    validations:
+      required: true
+
+  - type: input
+    id: target
+    attributes:
+      label: Target Architecture
+      description: Target triple being compiled (e.g. `aarch64-unknown-linux-gnu`)
+      placeholder: e.g. aarch64-unknown-linux-gnu
+    validations:
+      required: true
+
+  - type: dropdown
+    id: engine
+    attributes:
+      label: Execution Engine
+      description: Which engine were you using?
+      options:
+        - "auto"
+        - "direct (host)"
+        - "container (daemon)"
+        - "container (one-off docker run)"
+    validations:
+      required: true
+
+  - type: textarea
+    id: doctor
+    attributes:
+      label: Doctor Output
+      description: Please paste the full output of `hyprcross doctor`
+      render: text
+    validations:
+      required: true
+
+  - type: textarea
+    id: error_log
+    attributes:
+      label: Build Error Log
+      description: Paste the command you ran and terminal error output (run with `-v` if possible)
+      render: text
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to Reproduce
+      description: Steps or minimal repository to reproduce the issue
+    validations:
+      required: true
