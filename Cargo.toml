@@ -1,0 +1,53 @@
+[package]
+name = "hyprcross"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+rust-version = "1.89"
+authors = ["Jonas <me@byjonas.dev>", "The Rune Project Developers"]
+description = "Blazing-fast, zero-overhead cross-compilation and cross-testing for Rust and Rune with hyprlnk acceleration"
+repository = "https://github.com/runepm/hyprcross"
+homepage = "https://runepm.com"
+documentation = "https://docs.rs/hyprcross"
+readme = "README.md"
+keywords = ["cross", "cross-compilation", "hyprlnk", "rune", "qemu"]
+categories = ["development-tools::build-utils", "command-line-utilities"]
+default-run = "hyprcross"
+
+[lib]
+name = "hyprcross"
+path = "src/lib.rs"
+
+[[bin]]
+name = "hyprcross"
+path = "src/main.rs"
+
+[[bin]]
+name = "cargo-hyprcross"
+path = "src/bin/cargo-hyprcross.rs"
+
+[dependencies]
+clap = { version = "4", features = ["derive", "wrap_help", "env"] }
+serde = { version = "1", features = ["derive"] }
+toml = "1"
+serde_json = "1"
+colored = "2"
+indicatif = "0.17"
+anyhow = "1"
+thiserror = "2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tempfile = "3"
+dunce = "1.0"
+walkdir = "2"
+hyprlnk = { path = "../hyprlnk", optional = true }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[features]
+default = ["builtin-hyprlnk"]
+builtin-hyprlnk = ["dep:hyprlnk"]
+
+[dev-dependencies]
+tempfile = "3"
