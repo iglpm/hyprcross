@@ -59,7 +59,7 @@ jobs:
           echo "skip=false" >> "$GITHUB_OUTPUT"
 
       - name: Synchronize docs to GitHub Wiki
-        if: steps:check-wiki.outputs.skip != 'true'
+        if: steps.check-wiki.outputs.skip != 'true'
         env:
           AUTH_TOKEN: ${{ secrets.RUNIFIED_TOKEN || secrets.GITHUB_TOKEN }}
         run: |

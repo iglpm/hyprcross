@@ -33,24 +33,32 @@ jobs:
             os: macos-latest
             archive: tar.gz
           - target: x86_64-apple-darwin
-            os: macos-13
+            os: macos-15-intel
             archive: tar.gz
           - target: x86_64-pc-windows-msvc
             os: windows-latest
             archive: zip
     steps:
+      # hyprlnk, which hyprcross links with, is a submodule. While it is private the workflow's
+      # own token can't read it: HYPRLNK_TOKEN, with read access to both repositories, can.
       - name: Check out repository
         uses: actions/checkout@v4
         with:
           submodules: recursive
+          token: ${{ secrets.HYPRLNK_TOKEN || github.token }}
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
 
+      # zstd and mimalloc compile C: musl targets need musl's compiler.
+      - name: Install musl tools
+        if: contains(matrix.target, 'musl')
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+
       - name: Build release binaries
-        run: cargo build --release --target ${{ matrix.target }}
+        run: cargo build --release --locked --target ${{ matrix.target }}
 
       - name: Package release asset (Unix)
         if: matrix.archive == 'tar.gz'
@@ -58,7 +66,7 @@ jobs:
           cd target/${{ matrix.target }}/release
           tar -czf ../../../hyprcross-${{ matrix.target }}.tar.gz hyprcross cargo-hyprcross
           cd ../../..
-          sha256sum hyprcross-${{ matrix.target }}.tar.gz > hyprcross-${{ matrix.target }}.tar.gz.sha256
+          shasum -a 256 hyprcross-${{ matrix.target }}.tar.gz > hyprcross-${{ matrix.target }}.tar.gz.sha256
 
       - name: Package release asset (Windows)
         if: matrix.archive == 'zip'
