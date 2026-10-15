@@ -11,3 +11,11 @@ updates:
     schedule:
       interval: "monthly"
     open-pull-requests-limit: 3
+
+  # hyprlnk, the submodule hyprcross links with. Its pull requests run CI and every image's
+  # smoke test.
+  - package-ecosystem: "gitsubmodule"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 1
