@@ -1,150 +1,263 @@
+//! `hyprcross doctor`: what this machine has for cross-compiling, and what to do about the rest.
+
 use colored::Colorize;
-#[allow(unused_imports)]
 use std::path::Path;
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 use crate::builder::find_executable;
 use crate::container::{ContainerEngine, ContainerEngineKind};
-#[allow(unused_imports)]
-use crate::hyprlnk_driver;
-use crate::targets::current_host_triple;
+use crate::targets::{IMAGE_TARGETS, TargetInfo, current_host_triple};
 use crate::ui;
 
+struct Report {
+    problems: usize,
+}
+
+impl Report {
+    fn ok(&self, message: impl std::fmt::Display) {
+        ui::err(format!("  {} {message}", "✓".green().bold()));
+    }
+
+    fn info(&self, message: impl std::fmt::Display) {
+        ui::err(format!("  {} {message}", ui::dim("·")));
+    }
+
+    fn problem(&mut self, message: impl std::fmt::Display, fix: impl std::fmt::Display) {
+        self.problems += 1;
+        ui::err(format!(
+            "  {} {}",
+            "!".yellow().bold(),
+            message.to_string().yellow()
+        ));
+        for line in ui::wrap(
+            &fix.to_string(),
+            ui::term_width().saturating_sub(12).max(30),
+        ) {
+            ui::err(format!("    {}", ui::dim(line)));
+        }
+    }
+}
+
+fn version_of(program: &Path) -> Option<String> {
+    let out = Command::new(program)
+        .arg("--version")
+        .stderr(Stdio::null())
+        .output()
+        .ok()?;
+    let text = String::from_utf8_lossy(&out.stdout);
+    let line = text.lines().next()?.trim().to_string();
+    (!line.is_empty()).then_some(line)
+}
+
 pub fn run_doctor() {
-    ui::header("hyprcross doctor: cross-compilation health check\n");
+    let mut r = Report { problems: 0 };
+    let cwd = std::env::current_dir().unwrap_or_else(|_| ".".into());
+    ui::err(format!(
+        "{} {}",
+        ui::brand("hyprcross doctor"),
+        ui::dim(format!("· host {}", current_host_triple()))
+    ));
 
-    // 1. Host Architecture
-    println!("  {} Host triple: {}", "▸".bold().cyan(), current_host_triple().bold());
-
-    // 2. Rust Toolchain
-    print!("  {} Rust compiler: ", "▸".bold().cyan());
-    if let Ok(out) = Command::new("rustc").arg("--version").output() {
-        let v = String::from_utf8_lossy(&out.stdout);
-        println!("{}", v.trim().green());
-    } else {
-        println!("{}", "not found (please install rustup)".red());
-    }
-
-    // 3. Builder: Rune & Cargo
-    print!("  {} Rune build engine: ", "▸".bold().cyan());
-    if let Ok(out) = Command::new("rune").arg("--version").output() {
-        let v = String::from_utf8_lossy(&out.stdout);
-        println!("{} (CAS acceleration & pipelined compilation available)", v.trim().green());
-    } else {
-        println!("{} (Rune not detected; using Cargo as builder)", "optional".yellow());
-    }
-
-    print!("  {} Cargo package manager: ", "▸".bold().cyan());
-    if let Ok(out) = Command::new("cargo").arg("--version").output() {
-        let v = String::from_utf8_lossy(&out.stdout);
-        println!("{}", v.trim().green());
-    } else {
-        println!("{}", "not found".red());
-    }
-
-    // 4. hyprlnk Linker
-    print!("  {} hyprlnk linker: ", "▸".bold().cyan());
-    #[cfg(feature = "builtin-hyprlnk")]
-    {
-        println!("{} (embedded v{}, ELF/COFF/Mach-O accelerated)", "available".green(), hyprlnk::VERSION);
-    }
-    #[cfg(not(feature = "builtin-hyprlnk"))]
-    {
-        if let Some(p) = hyprlnk_driver::find_external_hyprlnk() {
-            println!("{} ({})", "found in PATH".green(), p.display());
-        } else {
-            println!("{}", "not found (falling back to standard linkers)".yellow());
-        }
-    }
-
-    // 5. Container Engines
-    println!("\n{}", "Container Engines:".bold());
-    let engines = [
-        ("docker", ContainerEngineKind::Docker),
-        ("podman", ContainerEngineKind::Podman),
-        ("finch", ContainerEngineKind::Finch),
-        ("nerdctl", ContainerEngineKind::Nerdctl),
-    ];
-
-    let mut found_any_engine = false;
-    for (name, kind) in engines {
-        if let Some(p) = find_executable(name) {
-            let engine = ContainerEngine { kind, path: p.clone() };
-            let service_ok = engine.check_service_available();
-            if service_ok {
-                println!(
-                    "  {} {} at {} (daemon responsive)",
-                    "✓".bold().green(),
-                    name.bold(),
-                    p.display()
-                );
-                found_any_engine = true;
+    // The Rust toolchain and its standard libraries.
+    match find_executable("rustc").and_then(|p| version_of(&p)) {
+        Some(v) => {
+            let targets = crate::workspace::active_toolchain(&cwd)
+                .and_then(|tc| std::fs::read_dir(tc.join("lib/rustlib")).ok())
+                .map(|d| {
+                    d.filter_map(|e| e.ok())
+                        .filter(|e| e.path().join("lib").is_dir())
+                        .count()
+                })
+                .unwrap_or(0);
+            if targets > 0 {
+                r.ok(format!(
+                    "{v}, with {}",
+                    ui::plural(targets, "standard library")
+                ));
             } else {
-                println!(
-                    "  {} {} at {} (daemon not running or permission denied)",
-                    "!".bold().yellow(),
-                    name.bold(),
-                    p.display()
+                r.ok(v);
+            }
+        }
+        None => r.problem(
+            "rustc is not on PATH",
+            "install Rust with rustup: https://rustup.rs",
+        ),
+    }
+
+    // The builder.
+    match find_executable("rune") {
+        Some(rune) => {
+            let v = version_of(&rune).unwrap_or_else(|| "rune".into());
+            r.ok(format!(
+                "{v} builds {}",
+                ui::dim("(content-addressed cache shared with containers)")
+            ));
+            if rune.to_string_lossy().contains("/target/debug/") {
+                r.problem(
+                    format!("the rune on PATH is a debug build: {}", ui::tilde(&rune)),
+                    "debug builds of rune are several times slower, cached builds included; \
+                     put a release build (target/release) first on PATH",
                 );
             }
         }
+        None => match find_executable("cargo") {
+            Some(cargo) => r.ok(format!(
+                "{} builds {}",
+                version_of(&cargo).unwrap_or_else(|| "cargo".into()),
+                ui::dim("(install Rune for its shared build cache)")
+            )),
+            None => r.problem(
+                "neither rune nor cargo is on PATH",
+                "install Rust with rustup: https://rustup.rs",
+            ),
+        },
     }
 
-    if !found_any_engine {
-        println!(
-            "  {} No active container engine found. Direct mode will be used for musl/bare-metal.",
-            "ℹ".bold().blue()
+    #[cfg(feature = "builtin-hyprlnk")]
+    r.ok(format!(
+        "hyprlnk {} links ELF, Mach-O and PE/COFF {}",
+        hyprlnk::VERSION,
+        ui::dim("(built in)")
+    ));
+    #[cfg(not(feature = "builtin-hyprlnk"))]
+    match crate::hyprlnk_driver::find_external_hyprlnk() {
+        Some(p) => r.ok(format!("hyprlnk at {}", ui::tilde(&p))),
+        None => r.info("hyprlnk is not built in and not on PATH: builds use the default linkers"),
+    }
+
+    // Containers.
+    let mut engine_ok = None;
+    for kind in ContainerEngineKind::ALL {
+        let Some(path) = find_executable(kind.name()) else {
+            continue;
+        };
+        let engine = ContainerEngine { kind, path };
+        if engine.check_service_available() {
+            let v = version_of(&engine.path)
+                .map(|v| v.replace(" version ", " ").replace(',', ""))
+                .unwrap_or_else(|| kind.name().into());
+            let how = if cfg!(target_os = "linux") {
+                "warm containers answer over a socket"
+            } else {
+                "warm containers run builds through exec"
+            };
+            r.ok(format!(
+                "{v} runs build containers {}",
+                ui::dim(format!("({how})"))
+            ));
+            engine_ok = Some(engine);
+            break;
+        }
+        r.problem(
+            format!("{} is installed but not answering", kind.name()),
+            "start its service (`sudo systemctl start docker`) or add yourself to its group",
+        );
+    }
+    if engine_ok.is_none() && !crate::engine::any_container_engine() {
+        r.problem(
+            "no container engine",
+            "targets without a C toolchain on this machine need one: install Podman or Docker",
         );
     }
 
-    // 6. QEMU User Emulation
-    println!("\n{}", "QEMU User Emulation:".bold());
-    let qemu_binaries = [
-        ("aarch64", "qemu-aarch64-static"),
-        ("arm", "qemu-arm-static"),
-        ("riscv64", "qemu-riscv64-static"),
-        ("ppc64le", "qemu-ppc64le-static"),
-        ("s390x", "qemu-s390x-static"),
-        ("x86_64", "qemu-x86_64-static"),
-    ];
-
-    let mut qemu_count = 0;
-    for (arch, bin) in qemu_binaries {
-        if let Some(p) = find_executable(bin) {
-            println!("  {} QEMU for {}: {}", "✓".bold().green(), arch, p.display());
-            qemu_count += 1;
+    // Emulators for tests.
+    let qemu: Vec<&str> = [
+        "aarch64",
+        "arm",
+        "riscv64",
+        "ppc64le",
+        "s390x",
+        "i386",
+        "loongarch64",
+        "ppc64",
+        "ppc",
+        "sparc64",
+    ]
+    .into_iter()
+    .filter(|a| {
+        find_executable(&format!("qemu-{a}-static")).is_some()
+            || find_executable(&format!("qemu-{a}")).is_some()
+    })
+    .collect();
+    if qemu.is_empty() {
+        r.info("no QEMU on this machine: direct-mode tests of other architectures need it; images have their own");
+    } else {
+        let binfmt = Path::new("/proc/sys/fs/binfmt_misc/status").exists();
+        r.ok(format!(
+            "QEMU runs {} programs {}",
+            qemu.join(", "),
+            ui::dim(if binfmt { "(binfmt_misc on)" } else { "" })
+        ));
+    }
+    for (program, what) in [("wine", "Windows"), ("wasmtime", "WASI")] {
+        if find_executable(program).is_some() {
+            r.ok(format!("{program} runs {what} programs"));
         }
     }
 
-    if qemu_count == 0 {
-        println!(
-            "  {} No QEMU static emulators found in PATH. Needed for `hyprcross test/run` on non-native targets.",
-            "!".bold().yellow()
-        );
+    // C toolchains for direct builds.
+    let direct: Vec<String> = IMAGE_TARGETS
+        .iter()
+        .map(|t| TargetInfo::parse(t))
+        .filter(|t| !t.is_host() && !t.links_without_c_toolchain())
+        .filter(|t| crate::direct::host_c_compiler(t).is_some())
+        .map(|t| t.triple)
+        .collect();
+    if direct.is_empty() {
+        r.info("no cross C compilers here: Linux, Windows and Android targets build in containers");
+    } else {
+        r.ok(format!(
+            "{} build directly {}",
+            ui::plural(direct.len(), "target"),
+            ui::dim(format!("({})", direct.join(", ")))
+        ));
     }
 
-    // 7. Kernel binfmt_misc
-    #[cfg(target_os = "linux")]
-    {
-        print!("  {} Linux kernel binfmt_misc: ", "▸".bold().cyan());
-        if Path::new("/proc/sys/fs/binfmt_misc").is_dir() {
-            println!("{}", "enabled (transparent binary emulation ready)".green());
-        } else {
-            println!("{}", "not mounted or disabled".yellow());
-        }
-    }
-
-    // 8. Installed Rustup Targets
-    println!("\n{}", "Installed rustup targets:".bold());
-    if let Ok(out) = Command::new("rustup").args(["target", "list", "--installed"]).output() {
-        let stdout = String::from_utf8_lossy(&out.stdout);
-        for line in stdout.lines() {
-            let line = line.trim();
-            if !line.is_empty() {
-                println!("  • {}", line.cyan());
+    // Images and warm containers.
+    if let Some(engine) = &engine_ok {
+        let config = crate::config::Config::load_from_dir(&cwd).unwrap_or_default();
+        let repo = config
+            .build
+            .image_repository
+            .trim_end_matches('/')
+            .to_string();
+        let images = Command::new(&engine.path)
+            .args(["images", "--format", "{{.Repository}}"])
+            .stderr(Stdio::null())
+            .output()
+            .map(|o| {
+                String::from_utf8_lossy(&o.stdout)
+                    .lines()
+                    .filter(|l| l.trim_start_matches("localhost/").starts_with(&repo))
+                    .count()
+            })
+            .unwrap_or(0);
+        r.info(format!(
+            "{} from {repo} on this machine {}",
+            ui::plural(images, "image"),
+            ui::dim("(pulled on first use)")
+        ));
+        if let Ok(list) = crate::daemon::list(engine) {
+            let running = list.iter().filter(|c| c.state == "running").count();
+            if !list.is_empty() {
+                r.info(format!(
+                    "{} warm, {} stopped {}",
+                    ui::plural(running, "container"),
+                    list.len() - running,
+                    ui::dim("(`hyprcross daemon status`)")
+                ));
             }
         }
     }
 
-    println!("\n{}", "Doctor summary: System is ready for hyprcross builds.".bold().green());
+    ui::err("");
+    if r.problems == 0 {
+        ui::err(format!("{} ready to cross-compile", "✓".green().bold()));
+    } else {
+        ui::err(format!(
+            "{} {} to look at",
+            "!".yellow().bold(),
+            ui::plural(r.problems, "thing")
+        ));
+    }
 }

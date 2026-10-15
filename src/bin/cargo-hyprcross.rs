@@ -1,9 +1,12 @@
+//! `cargo hyprcross …`: Cargo runs this as `cargo-hyprcross hyprcross …`.
+
 fn main() {
-    match hyprcross::run() {
-        Ok(code) => std::process::exit(code),
+    let code = match hyprcross::run() {
+        Ok(code) => code,
         Err(err) => {
-            hyprcross::ui::error(err);
-            std::process::exit(1);
+            hyprcross::ui::fatal(&err);
+            1
         }
-    }
+    };
+    std::process::exit(code);
 }

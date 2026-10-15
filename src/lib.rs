@@ -1,6 +1,8 @@
-//! hyprcross: Next-generation, high-performance cross-compilation and cross-testing
-//! engine for Rust and Rune.
+//! hyprcross: cross-compile and cross-test Rust, with Rune or Cargo, on the host when it can and
+//! in warm containers when it can't, linking with hyprlnk.
 
+#[cfg(unix)]
+pub mod agent;
 pub mod builder;
 pub mod cli;
 pub mod config;
@@ -9,23 +11,24 @@ pub mod daemon;
 pub mod direct;
 pub mod doctor;
 pub mod engine;
+pub mod help;
 pub mod hyprlnk_driver;
 pub mod qemu;
 pub mod targets;
 pub mod ui;
 pub mod workspace;
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use clap::Parser;
+use colored::Colorize;
 use std::ffi::OsString;
-use std::process::Command;
 
 use crate::builder::Builder;
-use crate::cli::{Cli, Commands, DaemonAction, ImagesAction};
+use crate::cli::{Cli, Commands, CommonArgs, DaemonAction, ImagesAction, SharedBuildOpts};
 use crate::config::Config;
 use crate::container::ContainerEngine;
-use crate::engine::{init_project, ExecutionContext};
-use crate::targets::TargetInfo;
+use crate::engine::{ExecutionContext, auto_engine, init_project};
+use crate::targets::{IMAGE_TARGETS, TargetInfo};
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -33,223 +36,543 @@ pub fn version() -> &'static str {
     VERSION
 }
 
-/// Main entry point for the hyprcross CLI and cargo-hyprcross binary
+/// Run `hyprcross` (or `cargo hyprcross`) with this process' arguments; the exit code.
 pub fn run() -> Result<i32> {
-    let mut raw_args: Vec<OsString> = std::env::args_os().collect();
+    let mut args: Vec<OsString> = std::env::args_os().collect();
 
-    // Check if invoked as `__hyprlnk` or if HYPRCROSS_HYPRLNK is set (acting as the linker)
-    if raw_args.len() > 1 && raw_args[1] == "__hyprlnk" {
-        let linker_args = raw_args.into_iter().skip(1);
-        std::process::exit(hyprlnk_driver::run_linker(linker_args));
+    if let Some(code) = hyprlnk_driver::linker_invocation(&args) {
+        return Ok(code);
     }
-    if std::env::var_os("HYPRCROSS_HYPRLNK").is_some() {
-        std::process::exit(hyprlnk_driver::run_linker(raw_args));
+    // Cargo runs `cargo-hyprcross hyprcross <args>`.
+    if args.get(1).is_some_and(|a| a == "hyprcross") {
+        args.remove(1);
     }
+    apply_color_flag(&args);
+    if help::intercept(&args) {
+        return Ok(0);
+    }
+    let args = hoist_own_options(args);
 
-    // Support `cargo hyprcross ...` invocation where Cargo passes "hyprcross" as argv[1]
-    if raw_args.len() > 1 && raw_args[1] == "hyprcross" {
-        raw_args.remove(1);
-    }
+    let cli = match Cli::try_parse_from(&args) {
+        Ok(cli) => cli,
+        Err(e) => {
+            let _ = e.print();
+            return Ok(e.exit_code());
+        }
+    };
+    ui::set_quiet(cli.quiet);
+    ui::set_verbose(cli.verbose);
 
-    let cli = Cli::parse_from(raw_args);
+    if let Some(Commands::Agent { socket, idle_mins }) = &cli.command {
+        return agent_main(socket, *idle_mins);
+    }
 
     let cwd = std::env::current_dir()?;
     let config = Config::load_from_dir(&cwd)?;
 
     match cli.command {
+        Some(Commands::Build(a)) => build("build", a, &cli.build_opts, config),
+        Some(Commands::Check(a)) => build("check", a, &cli.build_opts, config),
+        Some(Commands::Test(a)) => build("test", a, &cli.build_opts, config),
+        Some(Commands::Run(a)) => build("run", a, &cli.build_opts, config),
+        Some(Commands::Bench(a)) => build("bench", a, &cli.build_opts, config),
+        Some(Commands::Clippy(a)) => build("clippy", a, &cli.build_opts, config),
+        Some(Commands::Doc(a)) => build("doc", a, &cli.build_opts, config),
+        Some(Commands::Clean(a)) => clean(a, config),
+        Some(Commands::Targets) => {
+            list_targets(&config);
+            Ok(0)
+        }
         Some(Commands::Doctor) => {
             doctor::run_doctor();
             Ok(0)
         }
-        Some(Commands::Init(args)) => {
-            init_project(args.target.as_deref())?;
+        Some(Commands::Init(a)) => {
+            init_project(a.target.as_deref())?;
             Ok(0)
         }
-        Some(Commands::Hyprlnk { args }) => {
-            std::process::exit(hyprlnk_driver::run_linker(args));
+        Some(Commands::Daemon(a)) => {
+            daemon_command(a.action.unwrap_or(DaemonAction::Status), config)
         }
-        Some(Commands::Daemon(args)) => {
-            let container_engine = ContainerEngine::detect(&config.build.container_engine)?;
-            let action = args.action.unwrap_or(DaemonAction::Status);
-            match action {
-                DaemonAction::Status => {
-                    ui::info("daemon", "Checking active daemon container sessions...");
-                    let mut cmd = Command::new(&container_engine.path);
-                    cmd.args(["ps", "--filter", "name=hyprcross-"]);
-                    let status = cmd.status()?;
-                    Ok(status.code().unwrap_or(0))
-                }
-                DaemonAction::Start { target } => {
-                    let target_str = target
-                        .or_else(|| config.build.default_target.clone())
-                        .ok_or_else(|| {
-                            anyhow::anyhow!(
-                                "Please specify a target to warm (e.g. hyprcross daemon start --target aarch64-unknown-linux-gnu)"
-                            )
-                        })?;
-                    let target_info = TargetInfo::parse(&target_str);
-                    let builder = Builder::resolve(&config.build.builder)?;
-                    let daemon = daemon::ContainerDaemon::new(
-                        &container_engine,
-                        &target_info,
-                        &config,
-                        &builder,
-                        true,
-                    );
-                    daemon.ensure_started()?;
-                    ui::success("daemon", format!("Container `{}` is warm and running", daemon.container_name()));
-                    Ok(0)
-                }
-                DaemonAction::Stop { target, all } => {
-                    if all {
-                        ui::info("daemon", "Stopping all hyprcross daemon containers...");
-                        let output = Command::new(&container_engine.path)
-                            .args(["ps", "-q", "--filter", "name=hyprcross-"])
-                            .output()?;
-                        let stdout = String::from_utf8_lossy(&output.stdout);
-                        for id in stdout.lines() {
-                            let _ = Command::new(&container_engine.path).args(["rm", "-f", "-t", "0", id.trim()]).status();
-                        }
-                        ui::success("daemon", "All hyprcross containers stopped");
-                    } else if let Some(t) = target.or_else(|| config.build.default_target.clone()) {
-                        let target_info = TargetInfo::parse(&t);
-                        let builder = Builder::resolve(&config.build.builder)?;
-                        let daemon = daemon::ContainerDaemon::new(
-                            &container_engine,
-                            &target_info,
-                            &config,
-                            &builder,
-                            true,
-                        );
-                        daemon.stop()?;
-                    } else {
-                        bail!("Please specify --target <triple> or --all to stop daemon containers");
-                    }
-                    Ok(0)
-                }
-                DaemonAction::Prune => {
-                    ui::info("daemon", "Pruning exited hyprcross containers...");
-                    let output = Command::new(&container_engine.path)
-                        .args(["ps", "-a", "-q", "--filter", "name=hyprcross-", "--filter", "status=exited"])
-                        .output()?;
-                    let stdout = String::from_utf8_lossy(&output.stdout);
-                    for id in stdout.lines() {
-                        let _ = Command::new(&container_engine.path).args(["rm", "-f", "-t", "0", id.trim()]).status();
-                    }
-                    ui::success("daemon", "Prune complete");
-                    Ok(0)
-                }
-            }
-        }
-        Some(Commands::Images(args)) => {
-            let container_engine = ContainerEngine::detect(&config.build.container_engine)?;
-            match args.action {
-                ImagesAction::List => {
-                    ui::info("images", "Listing cached cross-compilation images:");
-                    let mut cmd = Command::new(&container_engine.path);
-                    cmd.args(["images", "--filter", "reference=*cross*"]);
-                    let status = cmd.status()?;
-                    Ok(status.code().unwrap_or(0))
-                }
-                ImagesAction::Pull { target } => {
-                    let target_info = TargetInfo::parse(&target);
-                    let image = if let Some(tc) = config.get_target(&target) {
-                        tc.image.clone().unwrap_or(target_info.default_image)
-                    } else {
-                        target_info.default_image
-                    };
-                    ui::info("images", format!("Pulling image `{image}`..."));
-                    let mut cmd = Command::new(&container_engine.path);
-                    cmd.args(["pull", &image]);
-                    let status = cmd.status()?;
-                    Ok(status.code().unwrap_or(0))
-                }
-            }
-        }
-        Some(Commands::Clean(args)) => {
-            let builder = Builder::resolve(&config.build.builder)?;
-            let mut cmd = builder.command("clean");
-            if let Some(t) = args.target
-                && builder.kind == crate::builder::BuilderKind::Cargo {
-                    cmd.arg("--target").arg(t);
-                }
-            for a in args.extra_args {
-                cmd.arg(a);
-            }
-            let status = cmd.status()?;
-            Ok(status.code().unwrap_or(0))
-        }
-        Some(Commands::Build(args)) => {
-            dispatch_build_command("build", args, config)
-        }
-        Some(Commands::Check(args)) => {
-            dispatch_build_command("check", args, config)
-        }
-        Some(Commands::Test(args)) => {
-            dispatch_build_command("test", args, config)
-        }
-        Some(Commands::Run(args)) => {
-            dispatch_build_command("run", args, config)
-        }
-        Some(Commands::Clippy(args)) => {
-            dispatch_build_command("clippy", args, config)
-        }
+        Some(Commands::Images(a)) => images_command(a.action, config),
+        Some(Commands::Agent { .. }) => unreachable!("handled above"),
         None => {
-            // Default to `build` if options were provided or show help
-            if cli.build_opts.target.is_some() || config.build.default_target.is_some() {
-                let args = crate::cli::CommonArgs {
-                    opts: cli.build_opts,
-                    extra_args: Vec::new(),
-                };
-                dispatch_build_command("build", args, config)
-            } else {
-                use clap::CommandFactory;
-                let mut cmd = Cli::command();
-                cmd.print_help()?;
-                println!();
-                Ok(0)
-            }
+            let args = CommonArgs {
+                opts: cli.build_opts.clone(),
+                extra_args: Vec::new(),
+            };
+            build("build", args, &SharedBuildOpts::default(), config)
         }
     }
 }
 
-fn dispatch_build_command(
-    subcommand: &str,
-    args: crate::cli::CommonArgs,
-    config: Config,
-) -> Result<i32> {
-    let target_str = args
-        .opts
-        .target
+/// Commands whose other arguments go to the builder.
+const BUILD_COMMANDS: &[&str] = &[
+    "build", "b", "check", "c", "test", "t", "run", "r", "bench", "clippy", "doc", "clean",
+];
+
+/// hyprcross' options that take a value, and those that don't.
+const OWN_WITH_VALUE: &[&str] = &[
+    "-t",
+    "--target",
+    "--engine",
+    "--linker",
+    "--builder",
+    "--color",
+];
+const OWN_FLAGS: &[&str] = &[
+    "--daemon",
+    "--no-daemon",
+    "-q",
+    "--quiet",
+    "-v",
+    "--verbose",
+    "-h",
+    "--help",
+];
+
+/// `hyprcross build --release -t x`: hyprcross' own options may come anywhere before `--`, as
+/// with Cargo; the rest is the builder's. Moves ours in front of the builder's.
+fn hoist_own_options(args: Vec<OsString>) -> Vec<OsString> {
+    let Some(sub) = args
+        .iter()
+        .skip(1)
+        .position(|a| a.to_str().is_some_and(|s| BUILD_COMMANDS.contains(&s)))
+        .map(|i| i + 1)
+    else {
+        return args;
+    };
+    let mut out: Vec<OsString> = args[..=sub].to_vec();
+    let mut theirs: Vec<OsString> = Vec::new();
+    let mut rest = args[sub + 1..].iter();
+    while let Some(a) = rest.next() {
+        let s = a.to_str().unwrap_or("");
+        if s == "--" {
+            theirs.extend(rest.by_ref().cloned());
+            break;
+        }
+        let name = s.split_once('=').map_or(s, |(n, _)| n);
+        if OWN_FLAGS.contains(&s) {
+            out.push(a.clone());
+        } else if OWN_WITH_VALUE.contains(&name) {
+            out.push(a.clone());
+            if !s.contains('=')
+                && let Some(value) = rest.next()
+            {
+                out.push(value.clone());
+            }
+        } else {
+            theirs.push(a.clone());
+        }
+    }
+    if !theirs.is_empty() {
+        out.push("--".into());
+        out.extend(theirs);
+    }
+    out
+}
+
+fn apply_color_flag(args: &[OsString]) {
+    let mut words = args.iter().filter_map(|a| a.to_str());
+    let mut choice = "auto";
+    while let Some(w) = words.next() {
+        if w == "--" {
+            break;
+        }
+        if let Some(v) = w.strip_prefix("--color=") {
+            choice = v;
+        } else if w == "--color" {
+            choice = words.next().unwrap_or("auto");
+        }
+    }
+    ui::set_color(choice);
+}
+
+#[cfg(unix)]
+fn agent_main(socket: &std::path::Path, idle_mins: u32) -> Result<i32> {
+    let idle = std::time::Duration::from_secs(u64::from(idle_mins) * 60);
+    agent::serve(socket, idle)?;
+    Ok(0)
+}
+
+#[cfg(not(unix))]
+fn agent_main(_socket: &std::path::Path, _idle_mins: u32) -> Result<i32> {
+    bail!("the container agent runs on Unix only")
+}
+
+/// The target: `--target`, else the one given before the command, else `default_target`.
+fn target_of(opts: &SharedBuildOpts, outer: &SharedBuildOpts, config: &Config) -> Result<String> {
+    opts.target
+        .clone()
+        .or_else(|| outer.target.clone())
         .or_else(|| config.build.default_target.clone())
         .ok_or_else(|| {
-            anyhow::anyhow!(
-                "No cross-compilation target specified. Pass `--target <triple>` or configure `default_target` in Hyprcross.toml"
+            ui::Hinted::error(
+                "no target given",
+                "pass one with `--target <triple>` (`hyprcross targets` lists those with \
+                 images), or set `default_target` in Hyprcross.toml",
             )
-        })?;
+        })
+}
 
-    let builder_pref = args
-        .opts
-        .builder
-        .unwrap_or_else(|| config.build.builder.clone());
+fn build(
+    subcommand: &str,
+    args: CommonArgs,
+    outer: &SharedBuildOpts,
+    config: Config,
+) -> Result<i32> {
+    let opts = &args.opts;
+    let target = target_of(opts, outer, &config)?;
+    let pick = |a: &Option<String>, b: &Option<String>| a.clone().or_else(|| b.clone());
+    let builder_pref =
+        pick(&opts.builder, &outer.builder).unwrap_or_else(|| config.build.builder.clone());
     let builder = Builder::resolve(&builder_pref)?;
-
-    let daemon_override = if args.opts.daemon {
-        Some(true)
-    } else if args.opts.no_daemon {
-        Some(false)
-    } else {
-        None
+    let daemon = match (
+        opts.daemon || outer.daemon,
+        opts.no_daemon || outer.no_daemon,
+    ) {
+        (true, _) => Some(true),
+        (_, true) => Some(false),
+        _ => None,
     };
-
     let ctx = ExecutionContext::new(
-        &target_str,
+        &target,
         config,
         builder,
-        args.opts.engine,
-        args.opts.linker,
-        daemon_override,
+        pick(&opts.engine, &outer.engine),
+        pick(&opts.linker, &outer.linker),
+        daemon,
     );
-
     ctx.run_command(subcommand, &args.extra_args)
+}
+
+fn clean(args: cli::CleanArgs, config: Config) -> Result<i32> {
+    let builder = Builder::resolve(
+        args.opts
+            .builder
+            .as_deref()
+            .unwrap_or(&config.build.builder),
+    )?;
+    let mut cmd = builder.command("clean");
+    if let Some(t) = args
+        .opts
+        .target
+        .as_ref()
+        .or(config.build.default_target.as_ref())
+        && builder.kind == builder::BuilderKind::Cargo
+    {
+        cmd.arg("--target").arg(t);
+    }
+    cmd.args(&args.extra_args);
+    ui::trace(format!("{cmd:?}"));
+    Ok(cmd.status()?.code().unwrap_or(1))
+}
+
+fn list_targets(config: &Config) {
+    let cwd = std::env::current_dir().unwrap_or_else(|_| ".".into());
+    let width = IMAGE_TARGETS.iter().map(|t| t.len()).max().unwrap_or(0) + 2;
+    ui::out(format!(
+        "{} {}",
+        ui::brand("Targets"),
+        ui::dim(format!(
+            "· {} with images at {}",
+            IMAGE_TARGETS.len(),
+            config.build.image_repository
+        ))
+    ));
+    let mut missing = 0;
+    for t in IMAGE_TARGETS {
+        let info = TargetInfo::parse(t);
+        let engine = match config.get_target(t).and_then(|c| c.engine.clone()) {
+            Some(e) => e,
+            None if config.build.engine != "auto" => config.build.engine.clone(),
+            None => auto_engine(&info, config).name().to_string(),
+        };
+        let std = crate::workspace::has_target_std(&cwd, t);
+        let mark = match std {
+            Some(true) => "✓".green().bold().to_string(),
+            Some(false) => {
+                missing += 1;
+                " ".to_string()
+            }
+            None => ui::dim("?"),
+        };
+        let runner = match info.image_runner() {
+            targets::Runner::None => String::new(),
+            r => format!("tests: {r}"),
+        };
+        ui::out(format!(
+            "  {mark} {t:<width$}{:<11}{}",
+            engine,
+            ui::dim(runner)
+        ));
+    }
+    ui::out("");
+    ui::out(ui::dim(format!(
+        "✓ standard library installed{}. Other targets rustc knows build too, on this machine.",
+        if missing > 0 {
+            "; the others are installed on first use"
+        } else {
+            ""
+        }
+    )));
+}
+
+fn daemon_command(action: DaemonAction, config: Config) -> Result<i32> {
+    let engine = ContainerEngine::detect(&config.build.container_engine)?;
+    match action {
+        DaemonAction::Status => {
+            let list = daemon::list(&engine)?;
+            if list.is_empty() {
+                ui::err(format!("{} no warm containers", ui::dim("·")));
+                ui::hint("the first container build for a target starts one");
+                return Ok(0);
+            }
+            let project = |c: &daemon::Listed| {
+                if c.project.is_empty() {
+                    return "an older hyprcross".to_string();
+                }
+                let full = ui::tilde(std::path::Path::new(&c.project));
+                // The last directories say which project it is.
+                let parts: Vec<&str> = full.split('/').collect();
+                if full.len() > 40 && parts.len() > 3 {
+                    format!("…/{}", parts[parts.len() - 2..].join("/"))
+                } else {
+                    full
+                }
+            };
+            let tw = list
+                .iter()
+                .map(|c| c.target.len())
+                .max()
+                .unwrap_or(0)
+                .max(1)
+                + 2;
+            let pw = list.iter().map(|c| project(c).len()).max().unwrap_or(0) + 2;
+            let running = list.iter().filter(|c| c.state == "running").count();
+            ui::out(format!(
+                "{} {}",
+                ui::brand("Warm containers"),
+                ui::dim(format!(
+                    "· {running} running, {} stopped",
+                    list.len() - running
+                ))
+            ));
+            for c in &list {
+                let (dot, state) = if c.state == "running" {
+                    (
+                        "●".green().to_string(),
+                        format!("{:<9}", "running").green().to_string(),
+                    )
+                } else {
+                    (ui::dim("○"), ui::dim(format!("{:<9}", c.state)))
+                };
+                let target = if c.target.is_empty() { "?" } else { &c.target };
+                ui::out(format!(
+                    "  {dot} {target:<tw$}{state}{:<pw$}{}",
+                    project(c),
+                    ui::dim(&c.name)
+                ));
+            }
+            if list.iter().any(|c| c.project.is_empty()) {
+                ui::hint(
+                    "containers from an older hyprcross are no longer used: `hyprcross daemon stop --all` removes every container",
+                );
+            } else if running < list.len() {
+                ui::hint("`hyprcross daemon prune` removes the stopped ones");
+            }
+            Ok(0)
+        }
+        DaemonAction::Start { target } => {
+            let target = target
+                .or(config.build.default_target.clone())
+                .ok_or_else(|| {
+                    anyhow::anyhow!("which target? `hyprcross daemon start --target <triple>`")
+                })?;
+            let info = TargetInfo::parse(&target);
+            let builder = Builder::resolve(&config.build.builder)?;
+            let d = daemon::ContainerDaemon::new(&engine, &info, &config, &builder)?;
+            d.warm()?;
+            ui::success(format!(
+                "{} is warm {}",
+                target,
+                ui::dim(format!("({})", d.container_name()))
+            ));
+            Ok(0)
+        }
+        DaemonAction::Stop { target, all } => {
+            if all {
+                let names: Vec<String> =
+                    daemon::list(&engine)?.into_iter().map(|c| c.name).collect();
+                let n = daemon::remove_all(&engine, &names);
+                daemon::clean_run_dirs()?;
+                ui::success(format!("stopped {}", ui::plural(n, "container")));
+                return Ok(0);
+            }
+            let Some(target) = target.or(config.build.default_target.clone()) else {
+                bail!("which target? pass `--target <triple>`, or `--all` for every container");
+            };
+            let info = TargetInfo::parse(&target);
+            let mut stopped = 0;
+            for kind in [builder::BuilderKind::Rune, builder::BuilderKind::Cargo] {
+                let Some(path) = builder::find_executable(kind.name()) else {
+                    continue;
+                };
+                let b = Builder { kind, path };
+                let d = daemon::ContainerDaemon::new(&engine, &info, &config, &b)?;
+                if d.stop() {
+                    stopped += 1;
+                }
+            }
+            if stopped == 0 {
+                ui::err(format!(
+                    "{} no warm container for {target} in this project",
+                    ui::dim("·")
+                ));
+            } else {
+                ui::success(format!("stopped the warm container for {target}"));
+            }
+            Ok(0)
+        }
+        DaemonAction::Prune => {
+            let names: Vec<String> = daemon::list(&engine)?
+                .into_iter()
+                .filter(|c| c.state != "running")
+                .map(|c| c.name)
+                .collect();
+            let n = daemon::remove_all(&engine, &names);
+            ui::success(format!("removed {}", ui::plural(n, "stopped container")));
+            Ok(0)
+        }
+    }
+}
+
+fn images_command(action: ImagesAction, config: Config) -> Result<i32> {
+    let engine = ContainerEngine::detect(&config.build.container_engine)?;
+    match action {
+        ImagesAction::List => {
+            let repo = config
+                .build
+                .image_repository
+                .trim_end_matches('/')
+                .to_string();
+            let out = engine
+                .command()
+                .args([
+                    "images",
+                    "--format",
+                    "{{.Repository}}:{{.Tag}}\t{{.Size}}\t{{.CreatedSince}}",
+                ])
+                .output()?;
+            let rows: Vec<(String, String, String)> = String::from_utf8_lossy(&out.stdout)
+                .lines()
+                .filter_map(|l| {
+                    let mut p = l.split('\t');
+                    Some((
+                        p.next()?.to_string(),
+                        p.next()?.to_string(),
+                        p.next()?.to_string(),
+                    ))
+                })
+                .filter(|(name, _, _)| {
+                    let name = name.trim_start_matches("localhost/");
+                    name.starts_with(&repo)
+                        || name.starts_with("ghcr.io/cross-rs/")
+                        || name.starts_with("hyprcross-custom/")
+                })
+                .collect();
+            if rows.is_empty() {
+                ui::err(format!("{} no build images on this machine", ui::dim("·")));
+                ui::hint(
+                    "they are pulled on first use, or with `hyprcross images pull -t <triple>`",
+                );
+                return Ok(0);
+            }
+            let w = rows.iter().map(|r| r.0.len()).max().unwrap_or(0) + 2;
+            ui::out(ui::brand("Build images"));
+            for (name, size, created) in rows {
+                ui::out(format!("  {name:<w$}{:>10}  {}", size, ui::dim(created)));
+            }
+            Ok(0)
+        }
+        ImagesAction::Pull { target } => {
+            let info = TargetInfo::parse(&target);
+            let cwd = std::env::current_dir()?;
+            let request = container::ImageRequest::for_target(&info, &config, &cwd)?;
+            let image = match &request {
+                container::ImageRequest::Configured(i) => i.clone(),
+                container::ImageRequest::Dockerfile { tag, .. } => tag.clone(),
+                container::ImageRequest::Default { image, fallback } => image
+                    .clone()
+                    .or_else(|| fallback.clone())
+                    .expect("one of them"),
+            };
+            engine.pull(&image)?;
+            // Warm containers keep the image they started from: replace them.
+            let names: Vec<String> = daemon::list(&engine)?
+                .into_iter()
+                .filter(|c| c.target == target)
+                .map(|c| c.name)
+                .collect();
+            let n = daemon::remove_all(&engine, &names);
+            if n > 0 {
+                ui::action(
+                    "stopped",
+                    format!("{} on the old image", ui::plural(n, "warm container")),
+                );
+            }
+            Ok(0)
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn hoist(args: &[&str]) -> Vec<String> {
+        hoist_own_options(args.iter().map(OsString::from).collect())
+            .into_iter()
+            .map(|a| a.into_string().unwrap())
+            .collect()
+    }
+
+    #[test]
+    fn own_options_are_found_among_the_builders() {
+        assert_eq!(
+            hoist(&[
+                "hyprcross",
+                "build",
+                "--release",
+                "-t",
+                "x",
+                "-p",
+                "app",
+                "--engine=direct",
+                "-q"
+            ]),
+            [
+                "hyprcross",
+                "build",
+                "-t",
+                "x",
+                "--engine=direct",
+                "-q",
+                "--",
+                "--release",
+                "-p",
+                "app"
+            ]
+        );
+        assert_eq!(
+            hoist(&["hyprcross", "test", "-t", "x", "--", "-v", "--nocapture"]),
+            ["hyprcross", "test", "-t", "x", "--", "-v", "--nocapture"],
+            "after -- everything is the builder's"
+        );
+        assert_eq!(
+            hoist(&["hyprcross", "daemon", "stop", "-t", "x"]),
+            ["hyprcross", "daemon", "stop", "-t", "x"]
+        );
+        assert_eq!(hoist(&["hyprcross", "build"]), ["hyprcross", "build"]);
+    }
 }

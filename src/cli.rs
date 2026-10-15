@@ -1,13 +1,39 @@
 use clap::{Args, Parser, Subcommand};
+use std::path::PathBuf;
+
+const BUILD_EXAMPLES: &[(&str, &str)] = &[
+    (
+        "hyprcross build -t aarch64-unknown-linux-gnu",
+        "64-bit Arm Linux",
+    ),
+    (
+        "hyprcross build -t x86_64-pc-windows-gnu --release",
+        "Windows, optimized",
+    ),
+    (
+        "hyprcross build -t riscv64gc-unknown-linux-gnu -p app",
+        "One package",
+    ),
+    (
+        "hyprcross build -t aarch64-unknown-linux-musl --engine container",
+        "In the image",
+    ),
+];
+
+const TEST_EXAMPLES: &[(&str, &str)] = &[
+    ("hyprcross test -t aarch64-unknown-linux-gnu", "Under QEMU"),
+    ("hyprcross test -t x86_64-pc-windows-gnu", "Under Wine"),
+    ("hyprcross test -t wasm32-wasip1 --lib", "Under Wasmtime"),
+];
 
 #[derive(Parser, Debug)]
 #[command(
     name = "hyprcross",
     bin_name = "hyprcross",
-    author = "Jonas <me@byjonas.dev>",
     version,
-    about = "Blazing-fast, zero-overhead cross-compilation and cross-testing with hyprlnk acceleration",
-    long_about = "A next-generation replacement for `cross` offering direct host execution, persistent container daemons, and 2x-4x faster linking via hyprlnk."
+    about = "Cross-compile and cross-test Rust, with Rune or Cargo",
+    styles = crate::help::styles(),
+    disable_help_subcommand = true
 )]
 pub struct Cli {
     #[command(subcommand)]
@@ -15,77 +41,101 @@ pub struct Cli {
 
     #[command(flatten)]
     pub build_opts: SharedBuildOpts,
+
+    /// When to use colours: auto, always or never
+    #[arg(long, global = true, value_name = "WHEN", default_value = "auto",
+          value_parser = ["auto", "always", "never"])]
+    pub color: String,
+
+    /// Only print errors
+    #[arg(short, long, global = true)]
+    pub quiet: bool,
+
+    /// Print the commands hyprcross runs
+    #[arg(short, long, global = true)]
+    pub verbose: bool,
 }
 
 #[derive(Subcommand, Debug)]
 pub enum Commands {
-    /// Compile the current package for the target architecture
+    /// Compile the package for a target
+    #[command(visible_alias = "b", after_help = crate::help::examples(BUILD_EXAMPLES))]
     Build(CommonArgs),
 
-    /// Analyze the current package and report errors without code generation
+    /// Type-check for a target, without generating code
+    #[command(visible_alias = "c")]
     Check(CommonArgs),
 
-    /// Execute unit and integration tests using QEMU target runner
+    /// Build and run the tests, under QEMU, Wine or Wasmtime
+    #[command(visible_alias = "t", after_help = crate::help::examples(TEST_EXAMPLES))]
     Test(CommonArgs),
 
-    /// Build and execute the target binary with QEMU user emulation
+    /// Build and run a binary on the target
+    #[command(visible_alias = "r")]
     Run(CommonArgs),
 
-    /// Run linter checks for the target architecture
+    /// Build and run the benchmarks on the target
+    Bench(CommonArgs),
+
+    /// Lint with clippy for a target
     Clippy(CommonArgs),
 
-    /// Remove target build artifacts
+    /// Build the documentation for a target
+    Doc(CommonArgs),
+
+    /// Remove build output
     Clean(CleanArgs),
 
-    /// Diagnose host cross-compilation environment and dependencies
+    /// List the targets with images, and how each builds here
+    Targets,
+
+    /// Check what cross-compiling needs on this machine
     Doctor,
 
-    /// Manage persistent warm container daemon sessions
+    /// Manage the warm build containers
     Daemon(DaemonArgs),
 
-    /// Manage cross container images
+    /// Pull and list the build images
     Images(ImagesArgs),
 
-    /// Initialize Hyprcross.toml configuration in the current directory
+    /// Write a Hyprcross.toml in this directory
     Init(InitArgs),
 
-    /// Internal linker entry point dispatching directly to hyprlnk
-    #[command(name = "__hyprlnk", hide = true)]
-    Hyprlnk {
-        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
-        args: Vec<String>,
+    /// The agent inside a warm container
+    #[command(name = "__agent", hide = true)]
+    Agent {
+        socket: PathBuf,
+        /// Stop after this many idle minutes; 0 for never
+        #[arg(long, default_value_t = 15)]
+        idle_mins: u32,
     },
 }
 
 #[derive(Args, Debug, Clone, Default)]
 pub struct SharedBuildOpts {
-    /// Target triple (e.g. aarch64-unknown-linux-gnu, x86_64-unknown-linux-musl)
-    #[arg(short, long, env = "HYPRCROSS_TARGET")]
+    /// Target triple (aarch64-unknown-linux-gnu, x86_64-pc-windows-gnu, …)
+    #[arg(short, long, env = "HYPRCROSS_TARGET", value_name = "TRIPLE")]
     pub target: Option<String>,
 
-    /// Execution engine: "auto", "direct", or "container"
-    #[arg(long, env = "HYPRCROSS_ENGINE")]
+    /// Where to build: auto, direct or container
+    #[arg(long, env = "HYPRCROSS_ENGINE", value_name = "ENGINE")]
     pub engine: Option<String>,
 
-    /// Linker acceleration: "hyprlnk" or "default"
-    #[arg(long, env = "HYPRCROSS_LINKER")]
+    /// Linker: hyprlnk or default
+    #[arg(long, env = "HYPRCROSS_LINKER", value_name = "LINKER")]
     pub linker: Option<String>,
 
-    /// Build orchestrator: "auto", "rune", or "cargo"
-    #[arg(long, env = "HYPRCROSS_BUILDER")]
+    /// Build tool: auto, rune or cargo
+    #[arg(long, env = "HYPRCROSS_BUILDER", value_name = "TOOL")]
     pub builder: Option<String>,
 
-    /// Keep container warm in background for instant sub-20ms invocations
+    /// Build in a warm container that stays up between builds
     #[arg(long, conflicts_with = "no_daemon")]
     pub daemon: bool,
 
-    /// Disable persistent warm container daemon (use one-off docker run)
+    /// Build in a fresh container that is removed afterwards
     #[arg(long, conflicts_with = "daemon")]
     pub no_daemon: bool,
-
-    /// Enable verbose diagnostic logs
-    #[arg(short, long)]
-    pub verbose: bool,
 }
 
 #[derive(Args, Debug, Clone, Default)]
@@ -93,22 +143,30 @@ pub struct CommonArgs {
     #[command(flatten)]
     pub opts: SharedBuildOpts,
 
-    /// Additional arguments forwarded directly to rune / cargo
-    #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+    /// Arguments for rune or cargo (`--release`, `-p app`, …)
+    #[arg(
+        trailing_var_arg = true,
+        allow_hyphen_values = true,
+        value_name = "ARGS"
+    )]
     pub extra_args: Vec<String>,
 }
 
 #[derive(Args, Debug, Clone, Default)]
 pub struct CleanArgs {
-    #[arg(short, long)]
-    pub target: Option<String>,
+    #[command(flatten)]
+    pub opts: SharedBuildOpts,
 
-    /// Additional arguments forwarded to rune / cargo clean
-    #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+    /// Arguments for `rune clean` or `cargo clean`
+    #[arg(
+        trailing_var_arg = true,
+        allow_hyphen_values = true,
+        value_name = "ARGS"
+    )]
     pub extra_args: Vec<String>,
 }
 
-#[derive(Args, Debug, Clone, Default)]
+#[derive(Args, Debug, Clone)]
 pub struct DaemonArgs {
     #[command(subcommand)]
     pub action: Option<DaemonAction>,
@@ -116,22 +174,22 @@ pub struct DaemonArgs {
 
 #[derive(Subcommand, Debug, Clone)]
 pub enum DaemonAction {
-    /// Show running daemon container sessions
+    /// List the warm containers
     Status,
-    /// Warm up daemon container for a specific target
+    /// Start the warm container for a target
     Start {
-        #[arg(short, long)]
+        #[arg(short, long, value_name = "TRIPLE")]
         target: Option<String>,
     },
-    /// Stop running daemon container for a target
+    /// Stop and remove warm containers
     Stop {
-        #[arg(short, long)]
+        #[arg(short, long, value_name = "TRIPLE")]
         target: Option<String>,
-        /// Stop all running hyprcross daemon containers
+        /// Every hyprcross container, of every project
         #[arg(long)]
         all: bool,
     },
-    /// Remove stopped or orphaned hyprcross daemon containers
+    /// Remove warm containers that have stopped
     Prune,
 }
 
@@ -143,18 +201,18 @@ pub struct ImagesArgs {
 
 #[derive(Subcommand, Debug, Clone)]
 pub enum ImagesAction {
-    /// List cached cross container images
+    /// List the build images on this machine
     List,
-    /// Pull image for target
+    /// Pull a target's image (warm containers then restart on it)
     Pull {
-        #[arg(short, long)]
+        #[arg(short, long, value_name = "TRIPLE")]
         target: String,
     },
 }
 
 #[derive(Args, Debug, Clone, Default)]
 pub struct InitArgs {
-    /// Default target to configure in Hyprcross.toml
-    #[arg(short, long)]
+    /// The default target to write
+    #[arg(short, long, value_name = "TRIPLE")]
     pub target: Option<String>,
 }
