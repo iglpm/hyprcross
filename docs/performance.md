@@ -1,94 +1,53 @@
-# Performance Analysis & Benchmarks
+# Performance
 
-Hyprcross was engineered from the ground up to eliminate the friction, startup latency, and linking bottlenecks of cross-compiling Rust projects.
+What a cross build costs beyond the build itself: starting the right toolchain in the right
+place. For a build with nothing to do, that is most of the time.
 
-All benchmark results documented below are **real measurements** captured directly on physical hardware and reproducible using the included benchmark suite.
+## Fully cached builds
 
----
+hyprcross building itself with nothing to compile (`build` right after a `build`), with Rune as
+the builder:
 
-## Benchmark Environment
+| | Median | Fastest |
+| :--- | ---: | ---: |
+| `rune build --target x86_64-unknown-linux-gnu` (no hyprcross) | 39.1 ms | 33.3 ms |
+| `hyprcross build -t x86_64-unknown-linux-gnu` (direct) | 39.7 ms | 35.7 ms |
+| `hyprcross build -t aarch64-unknown-linux-gnu` (warm container, agent) | **40.5 ms** | 37.0 ms |
+| `podman exec <container> rune build --target aarch64-unknown-linux-gnu` | 149.4 ms | 138.4 ms |
+| `podman exec <container> true` | 142.3 ms | 137.1 ms |
+| `hyprcross --version` | 0.7 ms | 0.6 ms |
 
-- **CPU**: Intel(R) Core(TM) i5-10400F CPU @ 2.90GHz (6 Cores / 12 Threads, up to 4.30 GHz)
-- **Memory**: 16 GB DDR4
-- **Operating System**: CachyOS Linux (Kernel `7.2.9-2-cachyos`, x86_64)
-- **Container Engine**: Podman 6.1.4 (Rootless)
-- **Rust Toolchain**: rustc 1.98.1 (48a229cea 2026-09-01)
-- **Target Architecture**: `aarch64-unknown-linux-gnu`
-- **Container Base**: `ghcr.io/cross-rs/aarch64-unknown-linux-gnu:edge`
-- **Workload**: Multi-crate Rust binary with `serde` (derive macros) and `serde_json` serialization.
-- **Reproducibility**: Run `python3 benches/bench_runner.py` in the repository root.
+Intel Core i5-10400F (6 cores, 12 threads), CachyOS (Linux 7.2), ext4, rootless Podman 6.1.4,
+rustc 1.98.1, release builds of Rune 2027.0.0 and hyprcross, image
+`hyprcross/aarch64-unknown-linux-gnu` built from [docker/](../docker); median of 15 runs after
+one warm-up.
 
----
+hyprcross adds about a millisecond on the host and under two in a container. The fourth row is
+what a build in a warm container cost before the agent: `podman exec` alone takes 140 ms.
 
-## 1. Startup & Container Lifecycle Latency
+Reproduce with `python3 benches/bench_runner.py` (it writes `benches/benchmark_results.json`).
 
-Cross-compilation tools traditionally invoke a cold container (`docker run --rm ...` or `podman run --rm ...`) on every command. Hyprcross introduces the **Persistent Warm Daemon**, which keeps an idle background container warm and executes commands instantaneously via lightweight container exec:
+## What was slow before
 
-| Operation | Best Time (min) | Average Time | Speedup vs Cold Spinup |
-| :--- | :---: | :---: | :---: |
-| **Daemon Status Query** (`hyprcross daemon status`) | **41.3 ms** | **41.6 ms** | Instant health check |
-| **Warm Daemon Container Start** (`hyprcross daemon start`) | **48.7 ms** | **161.1 ms** | Background initialization |
-| **Daemon Immediate Teardown** (`hyprcross daemon stop -t 0`) | **81.3 ms** | **151.8 ms** | Zero delay cleanup |
-| Standard Cold Container Spinup (`podman run --rm`) | 227.3 ms | 235.3 ms | Baseline |
+hyprcross 0.1 took over a second for a cached build in a container: 1.1 s for
+`aarch64-unknown-linux-gnu` before failing to link, and 1.6 s (debug builds) once linking was
+fixed but before the first fix below. Three things added up:
 
----
+| Cause | Cost | Fix |
+| :--- | ---: | :--- |
+| Rune restored every artifact from its cache on each build, and in a container it copied them: hard links can't cross the container's separate mounts of the project and `~/.rune`. Each copy was hashed again. | ≈ 1.5 s | Rune dates its copies like the cached original and recognises them on the next build (Rune `rune-cas`, `rune-common`). |
+| `podman exec` for every build, plus `podman ps` to see whether the container was running | ≈ 180 ms | The agent: a socket connection instead of the engine, and the container's state in a file instead of `ps`. |
+| `rustup target list` to check the target's standard library | ≈ 20 ms | Read from the toolchain's directory. |
 
-## 2. Null Latency (`check` and `build` with Zero Changes)
+hyprcross 0.1 also passed its linker through `RUSTFLAGS`, which made Rune treat every crate as
+changed whenever builds alternated between `rune` and `hyprcross`, and put `-C
+link-arg=__hyprlnk` on link lines, which broke them. Rune now links with its own hyprlnk and
+gets no flags from hyprcross.
 
-When working in an IDE or iterative editor loop, developers run `check` repeatedly. Eliminating container bootstrap overhead makes cross-checks feel instantaneous:
+## Your own setup
 
-| Command | Engine Mode | Min Latency | Avg Latency | Notes |
-| :--- | :--- | :---: | :---: | :--- |
-| `hyprcross check` | **Direct Mode** (`--engine direct`) | **< 20 ms** | **< 20 ms** | Zero container overhead |
-| `hyprcross check` | **Warm Daemon** (`--daemon`) | **166.5 ms** | **167.4 ms** | Container exec (cargo check: 0.00s) |
-| `hyprcross check` | Cold Container (`--no-daemon`) | 228.0 ms | 232.3 ms | Fresh container spawn & teardown |
-| `hyprcross build` | **Warm Daemon** (`--daemon`) | **167.3 ms** | **171.0 ms** | Up-to-date binary verification |
-| `hyprcross build` | Cold Container (`--no-daemon`) | 227.3 ms | 235.3 ms | Fresh container spawn & teardown |
-
----
-
-## 3. Incremental Rebuilds & hyprlnk Linking
-
-After modifying `src/main.rs`, the compiler re-compiles the crate and links the target AArch64 ELF binary:
-
-| Configuration | Linker | Min Rebuild Time | Avg Rebuild Time |
-| :--- | :--- | :---: | :---: |
-| **Hyprcross (Warm Daemon)** | **hyprlnk** | **312.6 ms** | **323.3 ms** |
-| Hyprcross (Warm Daemon) | GNU `ld` | 309.9 ms | 319.3 ms |
-| Hyprcross (Cold Container) | **hyprlnk** | **361.5 ms** | **370.3 ms** |
-| Hyprcross (Cold Container) | GNU `ld` | 371.8 ms | 381.8 ms |
-
-> [!TIP]
-> In large binaries with thousands of object symbols and debug sections (DWARF / PDB), `hyprlnk` demonstrates **2x to 4x faster link throughput** by parallelizing symbol hashing and section placement across all CPU cores.
-
----
-
-## 4. QEMU Emulation Test & Run Latency
-
-Hyprcross integrates transparent target execution via host `binfmt_misc` and container `/linux-runner`:
-
-| Action | Execution Mode | Min Duration | Avg Duration | Test Outcome |
-| :--- | :--- | :---: | :---: | :---: |
-| `hyprcross test` | **Warm Daemon** (QEMU AArch64) | **242.7 ms** | **244.3 ms** | All tests passed |
-| `hyprcross test` | Cold Container (QEMU AArch64) | 295.6 ms | 300.6 ms | All tests passed |
-| `hyprcross run` | **Warm Daemon** (QEMU AArch64) | **196.5 ms** | **208.3 ms** | Binary executed |
-
----
-
-## 5. How to Run the Benchmarks Locally
-
-Anyone can verify these numbers on their own workstation:
-
-```sh
-# Clone hyprcross
-git clone https://github.com/runepm/hyprcross.git
-cd hyprcross
-
-# Ensure hyprcross is built and in PATH
-cargo install --path . --force
-
-# Run the benchmark suite
-python3 benches/bench_runner.py
-```
-
-The runner automatically detects host CPU, kernel, memory, container engine, and outputs raw JSON results to `benches/benchmark_results.json`.
+- **A debug build of `rune` on PATH** is several times slower than a release build, cached
+  builds included (116 ms against 39 ms here). `hyprcross doctor` warns about it.
+- **The first build in a container** starts it (about 0.2 to 0.3 s with a local image) and, the
+  first time, pulls the image.
+- **Docker Desktop** (macOS, Windows) can't reach the agent's socket: builds use `exec` there.

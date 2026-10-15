@@ -1,199 +1,139 @@
 <div align="center">
 
-# Hyprcross
+# hyprcross
 
-**Blazing-fast, zero-overhead cross-compilation and cross-testing for Rust and Rune.**
+**Cross-compile and cross-test Rust, with Rune or Cargo.**
 
-A drop-in, significantly faster replacement for `cross` powered by zero-container host execution, persistent container daemons, and [hyprlnk](https://github.com/runepm/hyprlnk) linker acceleration.
+On the host when it can, in a warm container when it can't, linked with hyprlnk.
+A drop-in for `cross`: same `Cross.toml`, same commands.
 
 [![CI](https://github.com/runepm/hyprcross/actions/workflows/ci.yml/badge.svg)](https://github.com/runepm/hyprcross/actions/workflows/ci.yml)
-[![Wiki](https://img.shields.io/badge/docs-wiki-blue.svg)](https://github.com/runepm/hyprcross/wiki)
+[![Images](https://github.com/runepm/hyprcross/actions/workflows/images.yml/badge.svg)](https://github.com/runepm/hyprcross/actions/workflows/images.yml)
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](LICENSE-MIT.md)
-
-```sh
-# Drop-in replacement for cross
-hyprcross build --target aarch64-unknown-linux-gnu
-hyprcross test --target aarch64-unknown-linux-gnu
-```
 
 </div>
 
----
+```console
+$ hyprcross test -t aarch64-unknown-linux-gnu
+▸ testing aarch64-unknown-linux-gnu · container · rune · hyprlnk
+✓ 1 passed · 1 test binary · 1.12s
 
-## Why Cross-Compilation Needed a Revolution
-
-Cross-compiling Rust code has traditionally meant waiting on slow container orchestrations:
-- **Container Spin-Up Penalty**: Standard `cross` runs `docker run --rm` on every invocation, adding **1.5s to 3s** of container startup latency to every single command.
-- **Linker Bottlenecks**: Inside containers, standard GNU `ld` or `lld` takes seconds to minutes linking massive debug binaries on foreign targets.
-- **Unnecessary Isolation**: Pure Rust and `musl` targets are forced into heavy virtualized containers even when the host could compile them directly at native speeds.
-
-Hyprcross transforms cross-compilation into a first-class, sub-second developer experience.
-
----
-
-## What Makes Hyprcross So Fast
-
-### 1. Zero-Container Direct Engine (`0ms` Startup)
-For targets that do not require foreign runtime glibc sysroots (such as `x86_64-unknown-linux-musl`, `aarch64-unknown-linux-musl`, bare-metal targets, or when host cross-compilers exist), Hyprcross bypasses Docker and Podman completely. It builds natively on your host machine at 100% NVMe disk speeds with zero container startup latency.
-
-### 2. Persistent Container Daemon (`~18ms` Invocations)
-When container isolation is necessary for foreign C/C++ sysroots, Hyprcross keeps a warm background container alive. Subsequent builds, checks, and tests execute via sub-process `exec` in **under 20ms**, eliminating 98% of container startup overhead.
-
-### 3. hyprlnk Linker Acceleration (2×–4× Faster Linking)
-Hyprcross integrates [hyprlnk](https://github.com/runepm/hyprlnk), the next-generation multi-format linker:
-- **Linux ELF**: Parallel relocation scanning, concurrent section copying, and lock-free symbol resolution.
-- **Windows PE/COFF**: Concurrent PDB generation alongside PE image emission.
-- **macOS Mach-O**: Single-pass atom marking and hardware SHA ad-hoc signing.
-- Cuts linking durations on cross targets by **50% to 75%**.
-
-### 4. Rune & Cargo Dual Engine Support
-Hyprcross natively supports [Rune](https://runepm.com) and standard Cargo:
-- When Rune is available, Hyprcross leverages Rune's content-addressable storage (CAS), early `.rmeta` metadata unblocking, and multi-core work scheduler.
-- Seamlessly falls back to standard Cargo when Rune is not installed.
-
----
-
-## Real-World Benchmarks
-
-Measured on physical hardware (**Intel Core i5-10400F 12-thread CPU, Linux CachyOS, Podman 6.1.4, Rust 1.98.1**, target `aarch64-unknown-linux-gnu` with `serde` & `serde_json` workload):
-
-| Workload / Command | Hyprcross (Warm Daemon) | Cold Container (`podman run --rm`) | Latency Reduction |
-| :--- | :---: | :---: | :---: |
-| **Daemon Start / Warmup** | **48.7 ms** | 227.3 ms | **4.6× faster** |
-| **Daemon Status Check** | **41.3 ms** | — | **Instant** |
-| **Incremental `check`** | **166.5 ms** | 228.0 ms | **1.4× faster** |
-| **Incremental `build` (hyprlnk)** | **312.6 ms** | 361.5 ms | **Faster linking** |
-| **QEMU Emulation Tests (`hyprcross test`)** | **242.7 ms** | 295.6 ms | **All tests pass** |
-| **QEMU Target Execution (`hyprcross run`)** | **196.5 ms** | — | **Instant execution** |
-| **Daemon Teardown (`hyprcross daemon stop`)** | **81.3 ms** | — | **Immediate (-t 0)** |
-
-Run the benchmarks yourself on your workstation:
-```sh
-python3 benches/bench_runner.py
+$ hyprcross build -t aarch64-unknown-linux-gnu
+▸ building aarch64-unknown-linux-gnu · container · rune · hyprlnk
+✓ dev · 0 compiled · 94 cached · 0.03s
 ```
 
-Read our full [Performance & Benchmarks Report](docs/performance.md).
+## What it does
 
----
+- **Builds on the host when it can.** The host's own target, targets that need no C toolchain
+  (bare metal, WebAssembly), and targets whose C cross compiler is installed build directly:
+  hyprcross names the compiler as the linker and QEMU, Wine or Wasmtime as the test runner.
+- **Builds in a container when it can't.** Each target has an image with its toolchain and an
+  emulator for its tests ([30 of them](docker/README.md)). The project, `CARGO_HOME`,
+  `RUSTUP_HOME` and `RUNE_HOME` are mounted at their host paths, so the container builds with
+  the host's toolchain, shares its caches, and reports errors with host paths.
+- **Keeps the container warm.** The first build starts it; hyprcross' agent inside it then runs
+  every build over a Unix socket, without asking Docker or Podman anything. A fully cached
+  build in a container takes as long as one on the host.
+- **Links with hyprlnk.** Rune links with its built-in hyprlnk; with Cargo, hyprcross is the
+  linker. Linux (glibc and musl), Windows MSVC and macOS targets.
+- **Runs Rune or Cargo.** Rune when it is installed, with its shared, content-addressed cache;
+  Cargo otherwise.
 
-## Quickstart
+## How fast
 
-### Installation
+A fully cached build of hyprcross itself (`build` with nothing to do), Rune 2027.0 and
+hyprcross release builds, Podman 6.1, Intel i5-10400F, median of 15 runs:
+
+| | Time |
+| :--- | ---: |
+| `rune build`, host target, without hyprcross | 39 ms |
+| `hyprcross build`, host target | 40 ms |
+| `hyprcross build -t aarch64-unknown-linux-gnu`, warm container | **41 ms** |
+| the same through `podman exec`, as hyprcross 0.1 did | 149 ms |
+
+Before this release a cached build in a container took over 1.5 s: Rune copied and re-hashed
+every artifact on each build there, because its cache can't hard-link across the container's
+mounts.
+
+How it's measured, and what changed: [docs/performance.md](docs/performance.md).
+
+## Install
 
 ```sh
-# Clone and build from source
-git clone https://github.com/runepm/hyprcross.git
+git clone --recursive https://github.com/runepm/hyprcross   # with hyprlnk, a submodule
 cd hyprcross
-cargo build --release
-sudo cp target/release/hyprcross /usr/local/bin/
-sudo ln -sf /usr/local/bin/hyprcross /usr/local/bin/cargo-hyprcross
+cargo install --path .
 ```
 
-### Check Your Environment
-
-Verify your container engines, QEMU static emulators, kernel `binfmt_misc`, and toolchains:
+This installs `hyprcross` and `cargo-hyprcross` (for `cargo hyprcross …`). Then:
 
 ```sh
-hyprcross doctor
+hyprcross doctor     # what this machine has for cross-compiling
+hyprcross targets    # the targets with images, and how each builds here
 ```
 
-### Everyday Commands
-
-Hyprcross mirrors Cargo and Cross subcommands:
+## Use
 
 ```sh
-# Build for ARM64 Linux
-hyprcross build --target aarch64-unknown-linux-gnu
+hyprcross build -t aarch64-unknown-linux-gnu             # build
+hyprcross build -t x86_64-pc-windows-gnu --release       # builder options go anywhere
+hyprcross test  -t riscv64gc-unknown-linux-gnu           # tests under QEMU
+hyprcross test  -t x86_64-pc-windows-gnu                 # tests under Wine
+hyprcross run   -t aarch64-unknown-linux-musl -- --flag  # run the binary
+hyprcross check -t wasm32-wasip1                         # check, clippy, doc, bench, clean too
 
-# Fast type-checking without codegen
-hyprcross check --target aarch64-unknown-linux-gnu
-
-# Run tests under QEMU user emulation
-hyprcross test --target aarch64-unknown-linux-gnu
-
-# Build and execute target binary
-hyprcross run --target aarch64-unknown-linux-gnu -- --my-arg value
-
-# Clean target artifacts
-hyprcross clean --target aarch64-unknown-linux-gnu
+hyprcross daemon status                                  # the warm containers
+hyprcross images pull -t aarch64-unknown-linux-gnu       # a newer image
 ```
 
-You can also invoke it as a Cargo subcommand: `cargo hyprcross build --target ...`.
+`--engine direct|container` forces where a build runs, `--builder rune|cargo` what runs it,
+`--linker default` keeps the target's own linker, `--no-daemon` uses a fresh container per build.
 
----
+## Configure
 
-## Configuration & Drop-in Compatibility
-
-Hyprcross is 100% compatible with existing `Cross.toml` and `Cargo.toml [package.metadata.cross]` files.
-
-To unlock advanced engine options, create a `Hyprcross.toml`:
+Optional. `Hyprcross.toml` (or `Cross.toml`, or `[package.metadata.cross]`), in the project or
+any directory above it; `hyprcross init` writes one.
 
 ```toml
 [build]
-# "auto" (direct when possible, container otherwise), "direct", or "container"
-engine = "auto"
-
-# Linker acceleration: "hyprlnk" (default) or "default"
-linker = "hyprlnk"
-
-# Build orchestrator: "auto", "rune", or "cargo"
-builder = "auto"
-
-# Keep container warm in background for instant sub-20ms invocations
-daemon = true
-
-# Default target when --target is omitted
 default_target = "aarch64-unknown-linux-gnu"
 
 [target.aarch64-unknown-linux-gnu]
-image = "ghcr.io/cross-rs/aarch64-unknown-linux-gnu:edge"
-# env = { OPENSSL_STATIC = "1" }
-# volumes = ["/opt/sdk:/opt/sdk:ro"]
+# Libraries for the target, installed once when the warm container is created:
+pre_build = ["apt-get update && apt-get install -y libssl-dev:arm64"]
+env = { OPENSSL_STATIC = "1" }
 ```
 
-Check out our comprehensive [Configuration Reference](docs/configuration.md).
+All settings: [docs/configuration.md](docs/configuration.md).
 
----
+## Images
 
-## Supported Target Architectures
-
-Hyprcross supports all primary tiers of cross-compilation targets:
-
-| Architecture | Triples | Runner |
-| :--- | :--- | :--- |
-| **ARM64** | `aarch64-unknown-linux-gnu`, `aarch64-unknown-linux-musl`, `aarch64-apple-darwin` | `qemu-aarch64-static` |
-| **x86-64** | `x86_64-unknown-linux-gnu`, `x86_64-unknown-linux-musl`, `x86_64-pc-windows-msvc` | Native / Wine |
-| **ARMv7** | `armv7-unknown-linux-gnueabihf`, `armv7-unknown-linux-musleabihf` | `qemu-arm-static` |
-| **RISC-V 64** | `riscv64gc-unknown-linux-gnu`, `riscv64gc-unknown-linux-musl` | `qemu-riscv64-static` |
-| **PowerPC 64** | `powerpc64le-unknown-linux-gnu` | `qemu-ppc64le-static` |
-| **IBM s390x** | `s390x-unknown-linux-gnu` | `qemu-s390x-static` |
-| **WASM** | `wasm32-unknown-unknown`, `wasm32-wasip1`, `wasm32-wasip2` | `wasmtime` / Node |
-
-Explore the complete [Supported Targets Matrix](docs/targets.md).
-
----
+`ghcr.io/runepm/hyprcross/<target>`: Linux on glibc and musl for 12 architectures, Windows
+(MinGW-w64, with Wine), Android, FreeBSD, WASI (with Wasmtime) and bare-metal Arm. Rebuilt every
+week with the base system's updates and tested with hyprcross before they are pushed. See
+[docker/README.md](docker/README.md). Targets without an image fall back to cross-rs' images.
 
 ## Documentation
 
-| Guide | Description |
+| Guide | |
 | :--- | :--- |
-| [Getting Started](docs/getting-started.md) | Installation, initial setup, and first cross build |
-| [Architecture](docs/architecture.md) | Dual-engine design, direct mode, and persistent daemons |
-| [hyprlnk Integration](docs/hyprlnk-integration.md) | How hyprlnk achieves 2x–4x faster linking on cross binaries |
-| [Configuration Reference](docs/configuration.md) | Complete guide to `Hyprcross.toml` and `Cross.toml` |
-| [Supported Targets](docs/targets.md) | Architecture matrix, musl vs glibc, and container images |
-| [Performance & Benchmarks](docs/performance.md) | Latency and throughput benchmarks vs standard `cross` |
-| [Testing with QEMU](docs/qemu-testing.md) | Emulation setup, binfmt_misc, and `QEMU_LD_PREFIX` |
-| [Troubleshooting](docs/troubleshooting.md) | Docker permissions, missing headers, and runner fixes |
-
----
+| [Getting started](docs/getting-started.md) | Installation and the first cross build |
+| [Architecture](docs/architecture.md) | Direct builds, warm containers and the agent |
+| [Configuration](docs/configuration.md) | `Hyprcross.toml`, `Cross.toml` and environment variables |
+| [Targets](docs/targets.md) | What builds where, and what runs the tests |
+| [Images](docker/README.md) | The per-target images and how they are maintained |
+| [hyprlnk](docs/hyprlnk-integration.md) | How builds are linked |
+| [Testing with QEMU](docs/qemu-testing.md) | Running tests of other architectures |
+| [Performance](docs/performance.md) | Measurements and method |
+| [Troubleshooting](docs/troubleshooting.md) | Common problems and their fixes |
 
 ## Contributing
 
-We welcome benchmark contributions on real-world projects, bug reports, and pull requests! Please check out [CONTRIBUTING.md](CONTRIBUTING.md) and our [Code of Conduct](CODE_OF_CONDUCT.md).
-
----
+Bug reports, benchmarks on real projects and pull requests are welcome: see
+[CONTRIBUTING.md](CONTRIBUTING.md) and the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## License
 
-Dual-licensed under either the [Apache License, Version 2.0](LICENSE-APACHE.md) or the [MIT License](LICENSE-MIT.md), matching Rust and Rune project conventions.
+MIT or Apache-2.0, at your option: [LICENSE-MIT.md](LICENSE-MIT.md),
+[LICENSE-APACHE.md](LICENSE-APACHE.md).

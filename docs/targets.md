@@ -1,48 +1,42 @@
-# Supported Target Architectures
+# Targets
 
-Hyprcross supports all primary Rust target architectures across Linux, Windows, macOS, bare-metal, and WebAssembly.
+Any target rustc knows can be built: hyprcross runs the builder with `--target`. What differs is
+where the C toolchain comes from and what runs the tests. `hyprcross targets` lists the targets
+with images and how each builds on your machine.
 
----
+## With images
 
-## Target Matrix
+These have an image at `ghcr.io/runepm/hyprcross/<target>` with their C/C++ toolchain, and most
+with a runner for `test` and `run`. The full list, with toolchain versions:
+[docker/README.md](../docker/README.md#targets).
 
-| Target Triple | Operating System | ABI / Runtime | Direct Mode | hyprlnk Accelerated | Default QEMU Runner |
-| :--- | :--- | :--- | :---: | :---: | :--- |
-| `aarch64-unknown-linux-gnu` | Linux | glibc | Via sysroot | :white_check_mark: | `qemu-aarch64-static` |
-| `aarch64-unknown-linux-musl` | Linux | musl (static) | :white_check_mark: (Native) | :white_check_mark: | `qemu-aarch64-static` |
-| `x86_64-unknown-linux-gnu` | Linux | glibc | Host native | :white_check_mark: | Native |
-| `x86_64-unknown-linux-musl` | Linux | musl (static) | :white_check_mark: (Native) | :white_check_mark: | Native |
-| `armv7-unknown-linux-gnueabihf`| Linux | glibc | Via sysroot | :white_check_mark: | `qemu-arm-static` |
-| `armv7-unknown-linux-musleabihf`| Linux | musl (static) | :white_check_mark: (Native) | :white_check_mark: | `qemu-arm-static` |
-| `riscv64gc-unknown-linux-gnu` | Linux | glibc | Via sysroot | :white_check_mark: | `qemu-riscv64-static` |
-| `riscv64gc-unknown-linux-musl`| Linux | musl (static) | :white_check_mark: (Native) | :white_check_mark: | `qemu-riscv64-static` |
-| `powerpc64le-unknown-linux-gnu`| Linux | glibc | Via sysroot | :white_check_mark: | `qemu-ppc64le-static`|
-| `s390x-unknown-linux-gnu` | Linux | glibc | Via sysroot | :white_check_mark: | `qemu-s390x-static` |
-| `i686-unknown-linux-gnu` | Linux | glibc | Via multiarch | :white_check_mark: | `qemu-i386-static` |
-| `i686-unknown-linux-musl` | Linux | musl (static) | :white_check_mark: (Native) | :white_check_mark: | `qemu-i386-static` |
-| `x86_64-pc-windows-gnu` | Windows | MinGW-w64 (GNU) | Container / Direct | :white_check_mark: | Wine / Native |
-| `i686-pc-windows-gnu` | Windows | MinGW-w64 (GNU) | Container / Direct | :white_check_mark: | Wine / Native |
-| `x86_64-pc-windows-msvc` | Windows | MSVC | Direct mode / Custom image | :white_check_mark: | Wine / Native |
-| `i686-pc-windows-msvc` | Windows | MSVC | Direct mode / Custom image | :white_check_mark: | Wine / Native |
-| `aarch64-pc-windows-msvc` | Windows | MSVC | Direct mode / Custom image | :white_check_mark: | Windows ARM64 |
-| `aarch64-apple-darwin` | macOS | Mach-O / dyld | Direct mode / macOS host | :white_check_mark: | Rosetta / Native |
-| `x86_64-apple-darwin` | macOS | Mach-O / dyld | Direct mode / macOS host | :white_check_mark: | Native |
-| `wasm32-unknown-unknown` | WebAssembly | None | :white_check_mark: (Native) | — | Wasmtime / Node |
-| `wasm32-wasip1` / `wasip2` | WebAssembly | WASI | :white_check_mark: (Native) | — | Wasmtime |
+| Family | Targets | Tests run under |
+| :--- | :--- | :--- |
+| Linux, glibc 2.39 | x86-64, x86, AArch64, ARMv7, ARMv6, RISC-V 64, POWER (LE and BE), PowerPC, s390x, SPARC64, LoongArch64 | QEMU (x86-64 natively) |
+| Linux, musl 1.2.5 | x86-64, x86, AArch64, ARMv7, ARMv6, RISC-V 64, POWER LE | QEMU (x86-64 natively) |
+| Windows, MinGW-w64 | `x86_64-pc-windows-gnu`, `i686-pc-windows-gnu` | Wine |
+| Android, NDK r27c | AArch64, ARMv7, x86-64, x86 | build only |
+| FreeBSD 14.3 | `x86_64-unknown-freebsd` | build only |
+| WASI | `wasm32-wasip1`, `wasm32-wasip2` | Wasmtime |
+| Bare-metal Arm | `thumbv6m-none-eabi`, `thumbv7em-none-eabihf` | build only |
 
----
+hyprlnk links the Linux glibc and musl targets on x86-64, x86, AArch64, ARM, RISC-V 64, POWER LE,
+s390x and LoongArch64; the others link with their image's toolchain.
 
-## musl vs. glibc Targets
+## Without images
 
-### When to Choose musl (`*-unknown-linux-musl`)
+| Targets | How |
+| :--- | :--- |
+| macOS (`*-apple-darwin`) | On a Mac, directly (hyprlnk links them). Apple's SDK can't be put in a public image. |
+| Windows MSVC (`*-pc-windows-msvc`) | On Windows directly, or on Linux with an MSVC sysroot (e.g. from `xwin`) and `--engine direct`. Use `*-pc-windows-gnu` for a container. |
+| `wasm32-unknown-unknown`, other bare metal | Directly: rust-lld links them. |
+| Anything else cross-rs has an image for | In cross-rs' image (`ghcr.io/cross-rs/<target>:edge`). |
 
-For purely static Linux binaries that run anywhere without external runtime dependencies (including scratch containers like `FROM scratch` or Alpine Linux):
-- Hyprcross enables **Direct Mode** automatically for musl targets.
-- No Docker daemon or container image is required.
-- Compiled with `hyprlnk` in milliseconds on your host machine.
+## glibc or musl
 
-### When to Choose glibc (`*-unknown-linux-gnu`)
-
-When your crate depends on dynamically linked system packages, vendor SDKs, or hardware drivers:
-- Hyprcross uses the persistent container daemon with official multiarch sysroots.
-- Mounts `hyprlnk` inside the container for accelerated foreign linking.
+- **musl** (`*-linux-musl`): static binaries that run on any Linux of the architecture, from
+  `FROM scratch` containers to old distributions.
+- **glibc** (`*-linux-gnu`): dynamically linked against glibc 2.39 when built in the images, so
+  they need a system with glibc 2.39 or newer (Ubuntu 24.04, Debian 13, Fedora 40 and later). For
+  older systems, build for musl, or build in an image of your own with an older glibc (`image`
+  in `Hyprcross.toml`).

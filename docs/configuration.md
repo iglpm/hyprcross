@@ -1,121 +1,115 @@
-# Configuration Reference
+# Configuration
 
-Hyprcross supports extensive configuration via `Hyprcross.toml`, existing `Cross.toml` files, and `Cargo.toml` metadata tables.
+Everything is optional: without configuration hyprcross picks the engine, builder, linker and
+image per target.
 
----
+## Where hyprcross looks
 
-## Configuration File Resolution
+From the current directory upwards, the first of these in a directory wins:
 
-Hyprcross checks for configuration in the following order of priority:
+1. `Hyprcross.toml`
+2. `Cross.toml` (cross-rs' file, read as is)
+3. `Cargo.toml`: `[package.metadata.hyprcross]`, `[workspace.metadata.hyprcross]`, or the same
+   under `.cross`
 
-1. `Hyprcross.toml` in the current project or workspace directory.
-2. `Cross.toml` (100% backward compatibility with `cross-rs/cross`).
-3. `Cargo.toml` (`[package.metadata.hyprcross]` or `[package.metadata.cross]`).
-4. Global configuration at `~/.config/hyprcross/config.toml`.
+Then `~/.config/hyprcross/config.toml`. Keys can be spelled `snake_case` or, as in
+`Cross.toml`, `kebab-case`.
 
----
+`hyprcross init [-t <target>]` writes a commented `Hyprcross.toml`.
 
-## Global Build Settings (`[build]`)
+## `[build]`
 
 ```toml
 [build]
-# Execution engine mode:
-# - "auto" (default): Runs direct on host if target is musl/native, otherwise uses container
-# - "direct": Forces host execution (0ms container latency)
-# - "container": Forces containerized execution
+# Where builds run: "auto" (on the host when it can build the target, else in a container),
+# "direct" or "container".
 engine = "auto"
 
-# Linker acceleration:
-# - "hyprlnk" (default): Uses hyprlnk for 2x–4x faster linking
-# - "default": Uses target's standard linker (lld or GNU ld)
+# "hyprlnk" or "default" (the target's own linker).
 linker = "hyprlnk"
 
-# Build orchestrator:
-# - "auto" (default): Uses Rune if installed on host, otherwise Cargo
-# - "rune": Forces Rune build engine
-# - "cargo": Forces Cargo
+# "auto" (Rune when installed, else Cargo), "rune" or "cargo".
 builder = "auto"
 
-# Persistent warm container daemon:
-# When true, maintains background warm container for sub-20ms invocations
+# Keep a warm container per project and target.
 daemon = true
 
-# Container daemon idle timeout in minutes before auto-stopping (default: 15)
+# Minutes a warm container waits for the next build before it stops.
 idle_timeout_mins = 15
 
-# Container engine runtime:
-# "auto", "docker", "podman", "finch", or "nerdctl"
+# "auto" (Podman, Docker, Finch, nerdctl: the first installed), or one of them.
 container_engine = "auto"
 
-# Default target triple when --target is omitted
+# The target when --target is left out.
 default_target = "aarch64-unknown-linux-gnu"
-```
 
----
+# Images: <image_repository>/<target>:<image_tag>.
+image_repository = "ghcr.io/runepm/hyprcross"
+image_tag = "latest"
 
-## Target-Specific Settings (`[target.<triple>]`)
-
-You can customize individual target architectures:
-
-```toml
-[target.aarch64-unknown-linux-gnu]
-# Custom container image
-image = "ghcr.io/cross-rs/aarch64-unknown-linux-gnu:edge"
-
-# Path to custom Dockerfile / Containerfile
-# dockerfile = "docker/Dockerfile.aarch64"
-
-# Custom sysroot path for direct mode or QEMU library path
-sysroot = "/usr/aarch64-linux-gnu"
-
-# Target runner executable for `hyprcross test` and `hyprcross run`
-runner = "qemu-aarch64-static"
-
-# Injected environment variables
-[target.aarch64-unknown-linux-gnu.env]
-OPENSSL_STATIC = "1"
+# Variables for every target's builds, and host variables passed into containers.
+[build.env]
 PKG_CONFIG_ALLOW_CROSS = "1"
-
-# Additional volume mounts (format: host:container[:opts])
-volumes = [
-    "/opt/custom-sdk:/opt/custom-sdk:ro",
-]
-
-# Commands to run inside container before the build
-pre_build = [
-    "apt-get update && apt-get install -y libssl-dev",
-]
+passthrough = ["MY_TOKEN"]
+volumes = ["DATA_DIR"]   # variables holding host paths: mounted, and passed on
 ```
 
----
-
-## Environment Variables
-
-Hyprcross respects the following environment variables:
-
-| Variable | Description | Default |
-| :--- | :--- | :--- |
-| `HYPRCROSS_TARGET` | Default target triple | None |
-| `HYPRCROSS_ENGINE` | Engine override (`auto`, `direct`, `container`) | `auto` |
-| `HYPRCROSS_LINKER` | Linker override (`hyprlnk`, `default`) | `hyprlnk` |
-| `HYPRCROSS_BUILDER` | Builder override (`auto`, `rune`, `cargo`) | `auto` |
-| `HYPRCROSS_HYPRLNK` | When set, executable acts directly as the linker | Unset |
-| `RUST_BACKTRACE` | Forwarded directly into build and test processes | Host value |
-
----
-
-## Migration from `Cross.toml`
-
-Existing `Cross.toml` files work out of the box with zero modifications:
+## `[target.<triple>]`
 
 ```toml
-# Existing Cross.toml
 [target.aarch64-unknown-linux-gnu]
-image = "my-custom-image:latest"
-volumes = ["/tmp:/tmp"]
+# An image of your own instead of the target's:
+image = "registry.example.com/aarch64-builder:1"
 
-[target.aarch64-unknown-linux-gnu.env]
-passthrough = ["MY_API_KEY"]
+# Or one built from a Dockerfile (its directory is the context). It gets the target's image as
+# the HYPRCROSS_BASE_IMAGE (and CROSS_BASE_IMAGE) build argument:
+#   ARG HYPRCROSS_BASE_IMAGE
+#   FROM $HYPRCROSS_BASE_IMAGE
+#   RUN apt-get update && apt-get install -y libssl-dev:arm64
+dockerfile = "docker/Dockerfile.aarch64"
+
+# Shell commands run as root when the warm container is created.
+pre_build = ["apt-get update && apt-get install -y libssl-dev:arm64"]
+
+# Variables for this target's builds, and Cross.toml's lists.
+env = { OPENSSL_STATIC = "1" }
+
+# Extra mounts, host:container[:options].
+volumes = ["/opt/sdk:/opt/sdk:ro"]
+
+# Per-target overrides of [build]:
+engine = "container"
+linker = "default"
+
+# Direct mode: what runs the target's programs instead of QEMU, and the sysroot QEMU loads
+# shared libraries from.
+runner = "qemu-aarch64"
+sysroot = "/usr/aarch64-linux-gnu"
 ```
 
-Hyprcross reads these settings and automatically applies `hyprlnk` linking acceleration and persistent daemon caching.
+The images enable Ubuntu's multiarch for their architecture, so `apt-get install
+libfoo-dev:<arch>` in `pre_build` installs the target's libraries.
+
+## Environment variables
+
+| Variable | Overrides |
+| :--- | :--- |
+| `HYPRCROSS_TARGET` | `--target` / `default_target` |
+| `HYPRCROSS_ENGINE`, `HYPRCROSS_LINKER`, `HYPRCROSS_BUILDER` | `--engine`, `--linker`, `--builder` |
+| `HYPRCROSS_CONTAINER_ENGINE` | `container_engine` |
+| `HYPRCROSS_IMAGE_REPOSITORY`, `HYPRCROSS_IMAGE_TAG` | `image_repository`, `image_tag` (CI uses these to test images it just built) |
+| `NO_COLOR`, `CLICOLOR_FORCE` | colours, like `--color` |
+
+Passed into containers as they are on the host: `RUST_BACKTRACE`, `RUST_LOG`, `RUST_MIN_STACK`,
+`RUSTFLAGS`, `RUSTDOCFLAGS`, `CARGO_ENCODED_RUSTFLAGS`, `CARGO_INCREMENTAL`, `CARGO_BUILD_JOBS`,
+`CARGO_PROFILE_*_DEBUG`, `CARGO_TERM_VERBOSE`, `TERM`, `COLORTERM`, `NO_COLOR`, every `RUNE_*`
+setting except `RUNE_HOME`, and what `passthrough` lists.
+
+## Coming from cross
+
+A `Cross.toml` works unchanged, `[target.<triple>.env] passthrough`/`volumes` and `pre-build`
+included. Differences:
+
+- Targets with a hyprcross image use it instead of cross-rs' (set `image` to keep cross-rs').
+- Containers mount the project at its host path, not `/project`.
+- `pre-build` runs once per warm container, not before every build.

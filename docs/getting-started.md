@@ -1,102 +1,71 @@
-# Getting Started with Hyprcross
+# Getting started
 
-Hyprcross is designed as a drop-in, faster replacement for `cross`. You can invoke it as a standalone binary (`hyprcross`) or as a Cargo subcommand (`cargo hyprcross`).
+## Install
 
----
-
-## 1. Installation
-
-### From Source (Release Binary)
+hyprcross builds with Rust 1.89 or newer. It links with hyprlnk, a submodule, so clone it with
+`--recursive` (or run `git submodule update --init` in a clone made without it):
 
 ```sh
-# Clone and build
-git clone https://github.com/runepm/hyprcross.git
+git clone --recursive https://github.com/runepm/hyprcross
 cd hyprcross
-cargo build --release
-
-# Place into your PATH
-sudo cp target/release/hyprcross /usr/local/bin/
-sudo ln -sf /usr/local/bin/hyprcross /usr/local/bin/cargo-hyprcross
+cargo install --path .
 ```
 
-### Pre-built Binaries
+That installs `hyprcross` and `cargo-hyprcross`, so both `hyprcross build` and
+`cargo hyprcross build` work. Release archives for Linux, macOS and Windows are on the
+[releases page](https://github.com/runepm/hyprcross/releases).
 
-Pre-compiled release packages with SHA-256 checksums are available on our [GitHub Releases](https://github.com/runepm/hyprcross/releases) page for:
-- Linux (x86_64, aarch64, musl)
-- macOS (Apple Silicon arm64, Intel x86_64)
-- Windows (x86_64 MSVC)
+For targets your machine can't build itself, install Podman or Docker. For running tests of other
+architectures on the host, QEMU user-mode emulation (`qemu-user-static`); the images have their
+own.
 
----
+## Check the machine
 
-## 2. Verifying Your Environment
+```console
+$ hyprcross doctor
+hyprcross doctor · host x86_64-unknown-linux-gnu
+  ✓ rustc 1.98.1 (48a229cea 2026-09-01), with 26 standard libraries
+  ✓ rune 2027.0.0 builds (content-addressed cache shared with containers)
+  ✓ hyprlnk 2027.0.0 links ELF, Mach-O and PE/COFF (built in)
+  ✓ podman 6.1.4 runs build containers (warm containers answer over a socket)
+  ✓ QEMU runs aarch64, arm, riscv64 programs (binfmt_misc on)
+  · no cross C compilers here: Linux, Windows and Android targets build in containers
 
-Run `hyprcross doctor` to inspect installed container runtimes, QEMU emulators, kernel `binfmt_misc` support, and Rust toolchains:
+✓ ready to cross-compile
+```
+
+`hyprcross targets` lists the targets with images and where each would build.
+
+## Build
+
+In a Rust project:
 
 ```sh
-hyprcross doctor
+hyprcross build -t aarch64-unknown-linux-gnu
 ```
 
-Sample output:
-```text
-hyprcross doctor: cross-compilation health check
-
-  ▸ Host triple: x86_64-unknown-linux-gnu
-  ▸ Rust compiler: rustc 1.98.1 (48a229cea 2026-09-01)
-  ▸ Rune build engine: rune 2027.0.0 (CAS acceleration available)
-  ▸ Cargo package manager: cargo 1.98.1
-  ▸ hyprlnk linker: available (embedded v2027.0.0, ELF/COFF/Mach-O accelerated)
-
-Container Engines:
-  ✓ docker at /usr/bin/docker (daemon responsive)
-  ✓ podman at /usr/bin/podman (daemon responsive)
-
-QEMU User Emulation:
-  ✓ QEMU for aarch64: /usr/bin/qemu-aarch64-static
-  ✓ QEMU for arm: /usr/bin/qemu-arm-static
-  ✓ QEMU for riscv64: /usr/bin/qemu-riscv64-static
-  ▸ Linux kernel binfmt_misc: enabled (transparent binary emulation ready)
-
-Doctor summary: System is ready for hyprcross builds.
+```console
+▸ building aarch64-unknown-linux-gnu · container · rune · hyprlnk
+▸ pulled ghcr.io/runepm/hyprcross/aarch64-unknown-linux-gnu:latest (21.4s)
+▸ started container hyprcross-app-aarch64-unknown-linux-gnu-rune-3f2a1c (0.31s)
+✓ dev · 12 compiled · 0 cached · 4.12s
 ```
 
----
+The first build for a target pulls its image and starts a container; later builds go straight
+to the warm container. Options for the builder go anywhere: `hyprcross build --release -t
+aarch64-unknown-linux-gnu -p app`. Arguments after `--` go to the builder unread.
 
-## 3. Your First Cross-Compilation
-
-Inside any Rust or Rune project, simply specify your target architecture:
+## Test and run
 
 ```sh
-# Cross-compile for Linux ARM64
-hyprcross build --target aarch64-unknown-linux-gnu
-
-# Or via cargo plugin syntax
-cargo hyprcross build --target aarch64-unknown-linux-gnu
+hyprcross test -t aarch64-unknown-linux-gnu        # under QEMU
+hyprcross test -t x86_64-pc-windows-gnu            # under Wine
+hyprcross run  -t aarch64-unknown-linux-gnu -- --help
 ```
 
-### Type-Checking Without Codegen
+## Next
 
-Hyprcross supports `check` for lightning-fast feedback:
-
-```sh
-hyprcross check --target aarch64-unknown-linux-gnu
-```
-
----
-
-## 4. Running Cross-Compiled Tests
-
-To compile and run your test suite under target architecture emulation:
-
-```sh
-hyprcross test --target aarch64-unknown-linux-gnu
-```
-
-Hyprcross resolves the target QEMU emulator (`qemu-aarch64-static`) and configures `QEMU_LD_PREFIX` so your test binary executes seamlessly.
-
----
-
-## 5. Next Steps
-
-- Learn how [Architecture](architecture.md) delivers zero-delay container execution.
-- See how [hyprlnk Integration](hyprlnk-integration.md) accelerates linking by 2x–4x.
-- Customize your build settings in [Configuration](configuration.md).
+- Set a `default_target` and per-target settings: `hyprcross init`, then
+  [configuration](configuration.md).
+- How builds are placed and run: [architecture](architecture.md).
+- What the images contain: [docker/README.md](../docker/README.md).

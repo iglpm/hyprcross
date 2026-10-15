@@ -1,96 +1,110 @@
-# Hyprcross Architecture
+# Architecture
 
-Hyprcross is designed to eliminate the performance bottlenecks that plague conventional containerized cross-compilation tools.
-
----
-
-## The Cross-Compilation Bottlenecks
-
-Traditional tools like `cross-rs/cross` use a straightforward but slow execution model:
+hyprcross decides, per target, whether a build can run on the host or needs a container; runs
+the builder (Rune or Cargo) there with the target's linker and test runner; and keeps
+containers warm so the second build costs what it would on the host.
 
 ```text
-[User Command] → [Start Docker Container] → [Mount Volumes] → [Run Cargo in Container] → [Slow GNU ld/lld Link] → [Tear Down Container]
-     0s                   +1.8s                 +0.4s                   +8.2s                 +6.4s                   +0.3s
-Total Time: ~17.1 seconds
+hyprcross build -t <target>
+        │
+        ├─ host can build it ──────────► direct: rune/cargo on the host
+        │  (own target, no C needed,        linker = the target's C compiler
+        │   C cross compiler installed)     runner = QEMU / Wine / Wasmtime
+        │
+        └─ otherwise ──────────────────► container: rune/cargo in the target's image
+                                            warm container, agent over a Unix socket
 ```
 
-This model suffers from four structural performance flaws:
-1. **Container Spin-up Overhead**: Spawning a fresh container for each command incurs a 1.5s to 3s penalty on Linux and up to 5s on macOS/Windows.
-2. **Filesystem Virtualization Penalties**: Host-to-container volume bind mounts suffer from virtualization overhead and permission translation.
-3. **Linker Stalls**: Linking complex binaries inside the container relies on default GNU `ld` or `lld`, which lack modern parallel symbol hashing and concurrent relocation passes.
-4. **Unnecessary Containerization**: Many cross targets (such as `musl`, bare metal, or systems with local target sysroots) do not require container isolation, yet are forced into slow containers.
+## Choosing where to build
 
----
+With `engine = "auto"` (the default), a target builds on the host when
 
-## How Hyprcross Solves This
+- it is the host's own target, or the same OS family (macOS on macOS, MSVC on Windows),
+- it needs no C toolchain to link (bare metal, `wasm32-*`): Rust's own `rust-lld` links it, or
+- its C cross compiler is on PATH (`aarch64-linux-gnu-gcc`, `x86_64-w64-mingw32-gcc`, or what
+  `CC_<triple>` / `CARGO_TARGET_<TRIPLE>_LINKER` names),
 
-Hyprcross introduces a multi-tier execution architecture:
+and in a container otherwise, if there is an image for it and a container engine to run it.
+`hyprcross targets` shows the decision for every target with an image; `--engine` or the
+target's `engine` setting overrides it.
 
-```text
-                                 ┌───────────────────────────────┐
-                                 │      hyprcross CLI / API     │
-                                 └───────────────┬───────────────┘
-                                                 │
-                                 ┌───────────────▼───────────────┐
-                                 │     Engine Selection Matrix   │
-                                 └───────┬───────────────┬───────┘
-                                         │               │
-                 Target supports Direct  │               │ Requires Target Sysroot/Env
-                                         ▼               ▼
-                       ┌───────────────────┐   ┌───────────────────────────┐
-                       │   Direct Engine   │   │     Container Engine      │
-                       │   (Host Native)   │   │  (Persistent Daemon Pool) │
-                       └─────────┬─────────┘   └─────────────┬─────────────┘
-                                 │                           │
-                                 │  0ms startup delay        │  ~20ms docker/podman exec
-                                 │                           │
-                                 └───────────────┬───────────┘
-                                                 │
-                                 ┌───────────────▼───────────────┐
-                                 │     hyprlnk Linker Driver     │
-                                 │  (ELF / Mach-O / PE/COFF)     │
-                                 └───────────────┬───────────────┘
-                                                 │
-                                 ┌───────────────▼───────────────┐
-                                 │    Rune CAS or Cargo Engine   │
-                                 └───────────────────────────────┘
-```
+## Direct builds
 
----
+The builder runs on the host with `--target`. For a cross target hyprcross names the C cross
+compiler as `CARGO_TARGET_<TRIPLE>_LINKER` (unless it is set already): without it rustc would
+link with the host's `cc`. For `test`, `run` and `bench` it sets `CARGO_TARGET_<TRIPLE>_RUNNER`
+to QEMU (with the target's sysroot as `-L`), Wine or Wasmtime when they are installed.
 
-## Tier 1: Direct Host Engine (`engine = "direct"`)
+A missing standard library is installed with `rustup target add` first. Whether it is missing
+is read from the toolchain's directory, so a build that needs nothing installed starts no
+`rustup` process.
 
-When targeting platforms that don't depend on target-specific dynamic glibc runtime environments (such as `x86_64-unknown-linux-musl`, `aarch64-unknown-linux-musl`, `wasm32-unknown-unknown`, bare-metal Cortex-M, or when the host has the required target toolchains installed), Hyprcross completely bypasses Docker and Podman:
+## Containers
 
-- **0 ms container startup latency**.
-- Direct NVMe host disk I/O.
-- Full access to host compiler caches and Rune CAS storage.
-- Automated `hyprlnk` injection as the target cross-linker.
+### What a container gets
 
----
+| Mounted at the same path | Why |
+| :--- | :--- |
+| the workspace root (the nearest `[workspace]` above the current directory) | sources and the target directory |
+| path dependencies outside it (`path = "../lib"`) | so they resolve as on the host |
+| `CARGO_HOME`, `RUSTUP_HOME` | the host's toolchain and registry cache |
+| `RUNE_HOME` (with Rune) | Rune's shared build cache |
 
-## Tier 2: Persistent Container Daemon (`daemon = true`)
+Because everything sits where it does on the host, compiler errors carry host paths, and
+Rune's cache keys (which include paths) match between host and container builds.
 
-When container isolation is necessary (for instance, cross-compiling complex C/C++ dependencies like OpenSSL or SQLite that link against a target glibc sysroot), Hyprcross maintains a persistent warm container session in the background:
+hyprcross' own executable is mounted read-only at `/opt/hyprcross/bin/hyprcross` (the agent)
+and `/opt/hyprcross/bin/hyprlnk` (the linker for Cargo); Rune's at `/opt/hyprcross/bin/rune`.
+`/opt/hyprcross/bin` and `$CARGO_HOME/bin` come first on the image's own `PATH`. Containers run
+as the invoking user (`--userns=keep-id` with Podman, `--user` with Docker), so files they write
+belong to you.
 
-1. **Lazy Initialization**: The target container is spun up once in detached mode (`sleep infinity`).
-2. **Instant Sub-20ms Execution**: Subsequent commands (`build`, `check`, `test`, `clippy`) execute via `docker exec -i` or `podman exec -i`.
-3. **Shared Toolchain & Cache Volumes**: The Cargo cache and Rune CAS directories remain hot in memory, eliminating cold dependency downloads.
-4. **Idle Teardown**: After 15 minutes of inactivity (configurable via `idle_timeout_mins`), the daemon automatically shuts down to release system memory.
+### Warm containers and the agent
 
----
+With `daemon = true` (the default) each project, target and builder gets one long-lived
+container, `hyprcross-<project>-<target>-<builder>-<hash>`. Its main process is hyprcross
+itself, as an agent listening on a Unix socket in a mounted directory
+(`$XDG_RUNTIME_DIR/hyprcross/<id>/agent.sock`). A build:
 
-## Tier 3: Accelerated Linking via `hyprlnk`
+1. reads the state file next to the socket: the spec the running container was made from,
+2. compares it with the spec of this build (image, mounts, executables, `pre_build`), and if
+   they match,
+3. connects to the socket and sends the command, its environment and working directory.
 
-Linking is often the single longest serialized step of a multi-crate build. Hyprcross mounts or injects `hyprlnk` into the build process:
-- Linux ELF: Concurrent section copy, single-pass relocation processing, parallel symbol hashing.
-- Windows PE/COFF: Concurrent PDB generation alongside PE image writing.
-- macOS Mach-O: Parallel atom marking, chained fixups, and pipelined ad-hoc code signing.
+The agent starts the command (on a pseudo-terminal when hyprcross' output is a terminal, so
+progress bars and colours work), streams its output back and sends its exit code. If hyprcross
+goes away (Ctrl+C), the agent kills the command's process group. A warm build runs no
+`podman`/`docker` command at all; `podman exec` alone costs about 140 ms.
 
----
+When the spec differs (a new image tag, a rebuilt `rune`, a changed `pre_build`) the container
+is replaced. When it has stopped, it is started again. Containers stop by themselves after
+`idle_timeout_mins` (15) without a build. Where Unix sockets can't reach into the container
+(Docker Desktop on macOS and Windows), or the agent can't run in an image, builds go through
+`exec` instead.
 
-## Builder Orchestration: Rune & Cargo
+`pre_build` commands run once, as root, when the container is created.
 
-Hyprcross automatically probes for [Rune](https://runepm.com):
-- **If Rune is detected**: Hyprcross prioritizes `rune` as the build engine. In direct mode, it invokes `rune` on the host. In container mode (both one-off and persistent daemon), Hyprcross mounts the host's `rune` binary to `/usr/local/bin/rune` and bind-mounts `$HOME/.rune` to `/rune` (`RUNE_HOME=/rune`). This brings Rune's content-addressable store (CAS), pipelined `.rmeta` metadata unblocking, and multi-core scheduling into the cross-compilation environment with zero container rebuilds required.
-- **If only Cargo is detected**: Hyprcross falls back to standard `cargo`, configuring target flags and runners transparently.
+### One-off containers
+
+With `--no-daemon` (or `daemon = false`) every build runs in a fresh `run --rm` container.
+`pre_build` needs a warm container and is skipped.
+
+## Linking
+
+- **Rune** links with its built-in hyprlnk wherever hyprlnk supports the target, and uses the
+  target's configured linker (`CARGO_TARGET_<TRIPLE>_LINKER`, set by every image) as the C
+  driver hyprlnk links through. hyprcross passes nothing: Rune's cache stays the same whether
+  a build runs through hyprcross or not. `--linker default` passes
+  `--config build.linker="default"`.
+- **Cargo** gets hyprcross itself as the linker, under the name `hyprlnk` (a link in
+  `~/.cache/hyprcross/bin`, whose path doesn't change across updates, so Cargo's fingerprints
+  don't either), with `HYPRLNK_CC` naming the C driver.
+
+See [hyprlnk integration](hyprlnk-integration.md).
+
+## Images
+
+Per-target images live in [docker/](../docker/README.md) and are published to
+`ghcr.io/runepm/hyprcross/<target>`. When hyprcross' image for a target can't be pulled, it
+falls back to cross-rs' (`ghcr.io/cross-rs/<target>:edge`), which works the same way: both set
+the standard `CARGO_TARGET_*`/`CC_*` variables hyprcross and the builders read.

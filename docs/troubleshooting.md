@@ -34,10 +34,12 @@ Add your current user to the `docker` group, or use Podman:
 # Add user to docker group (requires logout/login)
 sudo usermod -aG docker $USER
 
-# Or use rootless Podman (no daemon needed)
+# Or use rootless Podman (no daemon needed); hyprcross prefers it when both are installed
 sudo apt-get install -y podman
-hyprcross config set build.container_engine podman
 ```
+
+To pick one explicitly: `container_engine = "podman"` under `[build]` in `Hyprcross.toml`, or
+`HYPRCROSS_CONTAINER_ENGINE=podman`.
 
 ---
 
@@ -98,13 +100,32 @@ openssl = { version = "0.10", features = ["vendored"] }
 
 ## 5. Cleaning Stale Daemon Containers
 
-If a container enters an inconsistent state:
+hyprcross replaces a warm container by itself when what it was made from changes (image,
+mounts, a rebuilt `rune` or `hyprcross`, `pre_build`). If one still misbehaves:
 
 ```sh
-# Stop and prune all hyprcross daemon containers
-hyprcross daemon stop --all
-hyprcross daemon prune
+hyprcross daemon status          # what runs, for which project
+hyprcross daemon stop -t <triple> # this project's container for a target
+hyprcross daemon stop --all      # every hyprcross container
+hyprcross daemon prune           # the stopped ones
 ```
+
+Containers from hyprcross 0.1 (named `hyprcross-<project>-<target>-<builder>`, without a
+hash) are no longer used; `hyprcross daemon stop --all` removes them.
+
+## 5a. Builds in a Container Are Slow Even With Nothing to Do
+
+- Run `hyprcross doctor`: a debug build of `rune` on PATH makes every build several times
+  slower.
+- With `-v`, hyprcross prints what it runs. A warm build shows one `agent:` line and no
+  `podman`/`docker` commands; if it shows `exec`, the agent couldn't start in the image (the
+  warning when the container was created says why), or the platform can't reach it.
+
+## 5b. `hyprcross build ... --engine direct` Passes `--engine` to the Builder
+
+It doesn't any more: hyprcross' own options (`-t`, `--engine`, `--builder`, `--linker`,
+`--daemon`, `--no-daemon`, `-q`, `-v`, `--color`) are picked out wherever they are, before `--`.
+Everything after `--` goes to the builder as is.
 
 ---
 
@@ -118,7 +139,7 @@ fetching manifest edge in ghcr.io/cross-rs/i686-pc-windows-msvc: Requesting bear
 ```
 
 ### Cause
-Microsoft MSVC SDK headers and runtime DLLs cannot be legally distributed in public open-source container images. Therefore, `ghcr.io/cross-rs` does not provide pre-built container images for `*-pc-windows-msvc` or `*-apple-darwin`.
+Microsoft MSVC SDK headers and runtime DLLs cannot be legally distributed in public open-source container images. Therefore neither hyprcross nor cross-rs provides images for `*-pc-windows-msvc` or `*-apple-darwin`; hyprcross says so before trying to pull one.
 
 ### Solutions
 

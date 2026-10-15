@@ -1,23 +1,18 @@
-# Hyprcross Documentation
+# hyprcross documentation
 
-Welcome to the Hyprcross documentation. Hyprcross is a next-generation, high-performance cross-compilation and cross-testing tool for Rust and Rune.
-
-## Documentation Index
-
-| Guide | Description |
+| Guide | |
 | :--- | :--- |
-| [Getting Started](getting-started.md) | Installation, initial setup, and compiling your first cross target |
-| [Architecture](architecture.md) | Dual-engine design, direct host execution, and persistent container daemons |
-| [hyprlnk Integration](hyprlnk-integration.md) | How the built-in hyprlnk linker achieves 2x–4x faster linking on cross binaries |
-| [Configuration Reference](configuration.md) | Complete guide to `Hyprcross.toml`, `Cross.toml` compatibility, and options |
-| [Supported Targets](targets.md) | Architecture matrix, musl/glibc tiers, container images, and runners |
-| [Performance & Benchmarks](performance.md) | Latency and throughput benchmarks vs standard `cross` |
-| [Testing with QEMU](qemu-testing.md) | Cross-testing, QEMU user emulation, binfmt_misc, and `QEMU_LD_PREFIX` |
-| [Troubleshooting](troubleshooting.md) | Resolving Docker socket permissions, missing C headers, and runner errors |
+| [Getting started](getting-started.md) | Installation and the first cross build |
+| [Architecture](architecture.md) | Direct builds, warm containers and the agent |
+| [Configuration](configuration.md) | `Hyprcross.toml`, `Cross.toml` and environment variables |
+| [Targets](targets.md) | What builds where, and what runs the tests |
+| [Images](../docker/README.md) | The per-target images and how they are maintained |
+| [hyprlnk](hyprlnk-integration.md) | How builds are linked |
+| [Testing with QEMU](qemu-testing.md) | Running tests of other architectures |
+| [Performance](performance.md) | Measurements and method |
+| [Troubleshooting](troubleshooting.md) | Common problems and their fixes |
 
-## Key Concepts
-
-- **Zero-Container Direct Execution**: For targets like `x86_64-unknown-linux-musl`, `aarch64-unknown-linux-musl`, bare-metal, and native cross builds, Hyprcross bypasses container runtimes entirely, delivering 0ms startup latency at native NVMe I/O speeds.
-- **Persistent Container Daemons**: When container isolation is required for target sysroots and C/C++ libraries, Hyprcross maintains warm background containers that execute commands in under 20ms via `exec`.
-- **hyprlnk Acceleration**: Standard cross builds are often bottlenecked by slow containerized GNU `ld` or `lld`. Hyprcross transparently injects `hyprlnk`, slashing link times by 50% to 75%.
-- **Rune & Cargo Dual Engine**: Leverages [Rune](https://runepm.com)'s content-addressable storage (CAS) and pipelined compilation when available, while maintaining 100% standard `cargo` compatibility.
+In short: hyprcross builds a target on the host when the host can (its own target, targets that
+need no C toolchain, targets whose C cross compiler is installed), and otherwise in that
+target's image, in a container that stays warm between builds and takes commands from hyprcross
+over a Unix socket. Rune or Cargo does the building; hyprlnk links.

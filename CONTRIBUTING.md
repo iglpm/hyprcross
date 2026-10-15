@@ -21,38 +21,49 @@ Hyprcross is written in modern Rust (2024 edition). It can be developed standalo
 
 ### Building and Testing Locally
 
+hyprcross links with [hyprlnk](https://github.com/runepm/hyprlnk), a submodule at `hyprlnk/`
+pinned to one commit:
+
 ```sh
-# Clone the repository
-git clone git@github.com:runepm/hyprcross.git
+git clone --recursive git@github.com:runepm/hyprcross.git
 cd hyprcross
 
-# Compile in debug mode
 cargo build
-
-# Run test suite
 cargo test
-
-# Check system health with doctor
 cargo run -- doctor
 ```
+
+To build against another hyprlnk commit, check it out in `hyprlnk/` and commit the submodule
+change (`git add hyprlnk`); Dependabot proposes newer ones weekly. In the Rune repository,
+hyprcross is a project of its own (excluded from Rune's workspace) with its own copy of hyprlnk:
+`git submodule update --init --recursive` there fetches it, and hyprlnk changes made in Rune's
+`hyprlnk/` reach hyprcross once they are committed, pushed and checked out in
+`hyprcross/hyprlnk/`.
+
+CI runs `cargo fmt --check`, `cargo clippy --all-targets --all-features --locked` and
+`cargo test --all-targets --all-features --locked` with warnings as errors, on Linux, macOS and
+Windows. Changes to `docker/` are checked with shellcheck, and the images they reach are built
+and smoke-tested; see [docker/README.md](docker/README.md) for doing that locally.
 
 ---
 
 ## Architecture Tour
 
-When hacking on Hyprcross, here is how the codebase is organized:
+- **`src/lib.rs`**: Entry point: reads the command line, loads configuration, picks the target, and hands the build to the engine.
+- **`src/cli.rs`**, **`src/help.rs`**, **`src/ui.rs`**: Commands and options (`clap`), the grouped help, and output in Rune's style.
+- **`src/config.rs`**: `Hyprcross.toml`, `Cross.toml` and `[package.metadata.*]`, found from the current directory upwards.
+- **`src/targets.rs`**: Target triples: their toolchain, image, runner, and whether the host can build them.
+- **`src/engine.rs`**: Where a build runs (host or container) and running it there.
+- **`src/direct.rs`**, **`src/qemu.rs`**: Builds on the host, with the target's C compiler as linker and QEMU, Wine or Wasmtime as runner.
+- **`src/container.rs`**, **`src/workspace.rs`**: Container engines, images, and the mounts a build needs (workspace root, path dependencies, toolchain and caches at their host paths).
+- **`src/daemon.rs`**, **`src/agent.rs`**: Warm containers, and the agent inside them that runs builds sent over a Unix socket.
+- **`src/hyprlnk_driver.rs`**: hyprlnk built in, as the linker for Cargo builds.
+- **`src/builder.rs`**: Rune or Cargo, and the options each gets.
+- **`src/doctor.rs`**: `hyprcross doctor`.
+- **`docker/`**: The per-target images, their scripts and the smoke test CI runs in each.
+- **`docs/`**: Documentation, synced to the GitHub Wiki on push (public repository only).
 
-- **`src/cli.rs`**: Command-line arguments parsed via `clap`.
-- **`src/config.rs`**: Config discovery for `Hyprcross.toml`, `Cross.toml`, and `Cargo.toml [package.metadata.hyprcross]`.
-- **`src/targets.rs`**: Target architecture mapping, default container images, QEMU runner mapping, and musl/glibc detection.
-- **`src/hyprlnk_driver.rs`**: Direct integration with the `hyprlnk` high-performance linker (COFF, ELF, Mach-O).
-- **`src/direct.rs`**: Zero-container direct host compilation engine for musl, bare-metal, and native cross builds.
-- **`src/container.rs`**: Container engine runner with user permission preservation and volume mounts.
-- **`src/daemon.rs`**: Persistent warm container daemon executing commands via `exec` in ~20ms.
-- **`src/qemu.rs`**: Cross-runner resolution and `QEMU_LD_PREFIX` dynamic library prefixing.
-- **`src/doctor.rs`**: Diagnostic health check examining container runtimes, QEMU, binfmt_misc, and toolchains.
-- **`src/builder.rs`**: Build orchestrator abstraction bridging `rune` and `cargo`.
-- **`docs/`**: Documentation synced automatically to the GitHub Wiki on push.
+Maintainers: [MAINTAINING.md](MAINTAINING.md) covers the repository's GitHub setup, secrets and releases.
 
 ---
 

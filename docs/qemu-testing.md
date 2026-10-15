@@ -14,6 +14,15 @@ Hyprcross bridges this automatically:
 2. **Dynamic Linker Configuration (`QEMU_LD_PREFIX`)**: Foreign dynamically linked binaries require target glibc shared libraries (`ld-linux-aarch64.so.1`, `libc.so.6`). Hyprcross configures the sysroot library path so the emulator can resolve dynamic symbols without `file not found` errors.
 3. **Runner Injection**: Hyprcross sets `CARGO_TARGET_<TRIPLE>_RUNNER` to route test harness execution through QEMU transparently.
 
+In containers none of this is needed on the host: every hyprcross image whose target can run
+under emulation has QEMU (or Wine, or Wasmtime) and sets `CARGO_TARGET_<TRIPLE>_RUNNER` to
+`hyprcross-runner`, which picks the right one. The sections below are about tests run directly
+on the host (`--engine direct`, or targets whose C cross compiler is installed).
+
+On the host, QEMU's `-L` sysroot is the configured `sysroot`, else where distributions install
+the cross toolchain's C library: `/usr/<prefix>/libc` (Arch) or `/usr/<prefix>` (Debian, Fedora),
+with `<prefix>` like `aarch64-linux-gnu`.
+
 ---
 
 ## Running Unit and Integration Tests
