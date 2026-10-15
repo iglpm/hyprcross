@@ -1,172 +1,116 @@
 #!/usr/bin/env python3
-"""
-hyprcross Reproducible Benchmark Runner
-Benchmarks real cross-compilation latency, linking throughput, and QEMU emulation overhead.
+"""The measurements in docs/performance.md: fully cached builds of hyprcross itself, on the host
+and in a warm container, next to the builder alone and to `<engine> exec`.
+
+    python3 benches/bench_runner.py [--runs 15] [--target aarch64-unknown-linux-gnu]
+
+Needs `hyprcross` and `rune` on PATH (release builds, for numbers worth comparing) and a
+container engine. The first build pulls the target's image and starts its container; only the
+builds after it are measured. Results go to benches/benchmark_results.json.
 """
 
+import argparse
+import json
 import os
+import platform
+import shutil
+import statistics
+import subprocess
 import sys
 import time
-import shutil
-import tempfile
-import subprocess
-import json
 from pathlib import Path
 
-TARGET = "aarch64-unknown-linux-gnu"
-WARMUP_RUNS = 1
-BENCH_RUNS = 3
+ROOT = Path(__file__).resolve().parent.parent
 
-def run_cmd(cmd, cwd=None):
-    t0 = time.perf_counter()
-    res = subprocess.run(cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-    t1 = time.perf_counter()
-    if res.returncode != 0:
-        print(f"FAILED: {' '.join(cmd)}\nSTDERR:\n{res.stderr}", file=sys.stderr)
-        sys.exit(1)
-    return (t1 - t0) * 1000.0  # ms
 
-def bench(name, fn, runs=BENCH_RUNS, warmup=WARMUP_RUNS):
-    for _ in range(warmup):
-        fn()
-    durations = []
+def version(cmd):
+    try:
+        out = subprocess.run(cmd, capture_output=True, text=True, check=True).stdout
+        return out.strip().splitlines()[0]
+    except (OSError, subprocess.CalledProcessError, IndexError):
+        return None
+
+
+def cpu_model():
+    try:
+        for line in Path("/proc/cpuinfo").read_text().splitlines():
+            if line.startswith("model name"):
+                return line.split(":", 1)[1].strip()
+    except OSError:
+        pass
+    return platform.processor() or None
+
+
+def measure(argv, runs):
+    """Median and fastest wall time of `argv` in milliseconds, after one warm-up run."""
+    subprocess.run(argv, cwd=ROOT, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    times = []
     for _ in range(runs):
-        durations.append(fn())
-    avg_ms = sum(durations) / len(durations)
-    min_ms = min(durations)
-    print(f"  {name:<45} : avg = {avg_ms:6.1f} ms | min = {min_ms:6.1f} ms")
-    return {"avg_ms": round(avg_ms, 1), "min_ms": round(min_ms, 1), "samples": [round(d, 1) for d in durations]}
+        start = time.perf_counter()
+        done = subprocess.run(argv, cwd=ROOT, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+        times.append((time.perf_counter() - start) * 1000)
+        if done.returncode != 0:
+            sys.exit(f"failed: {' '.join(argv)}\n{done.stderr.decode(errors='replace')}")
+    return {"median_ms": round(statistics.median(times), 1), "min_ms": round(min(times), 1)}
 
-def setup_test_project(dest_dir):
-    cargo_toml = dest_dir / "Cargo.toml"
-    cargo_toml.write_text("""[package]
-name = "bench_crate"
-version = "0.1.0"
-edition = "2024"
-
-[dependencies]
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-""")
-    src_dir = dest_dir / "src"
-    src_dir.mkdir(parents=True, exist_ok=True)
-    main_rs = src_dir / "main.rs"
-    main_rs.write_text("""use serde::{Serialize, Deserialize};
-
-#[derive(Serialize, Deserialize, Debug, PartialEq)]
-struct Message {
-    id: u64,
-    content: String,
-}
-
-fn main() {
-    let msg = Message { id: 42, content: "hyprcross benchmark payload".to_string() };
-    let json = serde_json::to_string(&msg).unwrap();
-    println!("Serialized: {}", json);
-}
-
-#[test]
-fn test_serde_roundtrip() {
-    let msg = Message { id: 100, content: "test".to_string() };
-    let json = serde_json::to_string(&msg).unwrap();
-    let deserialized: Message = serde_json::from_str(&json).unwrap();
-    assert_eq!(msg, deserialized);
-}
-""")
 
 def main():
-    print("=" * 70)
-    print(" hyprcross Cross-Compilation Benchmark Suite")
-    print(" Target: " + TARGET)
-    print("=" * 70)
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--runs", type=int, default=15)
+    parser.add_argument("--target", default="aarch64-unknown-linux-gnu")
+    parser.add_argument("--host", default="x86_64-unknown-linux-gnu")
+    args = parser.parse_args()
 
-    # Detect specs
-    specs = {
-        "cpu": subprocess.check_output("LC_ALL=C lscpu | grep 'Model name' | head -1", shell=True).decode().split(":")[1].strip(),
-        "cores": subprocess.check_output("nproc", shell=True).decode().strip(),
-        "os": subprocess.check_output("cat /etc/os-release | grep PRETTY_NAME", shell=True).decode().split("=")[1].strip('"\n'),
-        "kernel": subprocess.check_output("uname -r", shell=True).decode().strip(),
-        "rustc": subprocess.check_output("rustc --version", shell=True).decode().strip(),
-        "podman": subprocess.check_output("podman --version", shell=True).decode().strip(),
+    hyprcross = os.environ.get("HYPRCROSS") or shutil.which("hyprcross")
+    rune = shutil.which("rune")
+    engine = shutil.which("podman") or shutil.which("docker")
+    if not (hyprcross and rune and engine):
+        sys.exit("needs hyprcross, rune and podman or docker on PATH")
+
+    print(f"warming up: building for {args.host} and {args.target} once …", file=sys.stderr)
+    for target in (args.host, args.target):
+        subprocess.run([hyprcross, "build", "-q", "-t", target], cwd=ROOT, check=True)
+
+    names = subprocess.run(
+        [engine, "ps", "--filter", f"label=dev.hyprcross.target={args.target}", "--format", "{{.Names}}"],
+        capture_output=True, text=True, check=True,
+    ).stdout.split()
+    container = next((n for n in names if "-rune-" in n), None)
+    if not container:
+        sys.exit(f"no warm rune container for {args.target}")
+
+    cases = [
+        ("rune build, host target (no hyprcross)", [rune, "build", "--target", args.host]),
+        ("hyprcross build, host target (direct)", [hyprcross, "build", "-t", args.host]),
+        (f"hyprcross build, {args.target} (warm container, agent)", [hyprcross, "build", "-t", args.target]),
+        (f"{Path(engine).name} exec + rune build (the exec path)",
+         [engine, "exec", "-w", str(ROOT), container, "rune", "build", "--target", args.target]),
+        (f"{Path(engine).name} exec true (exec floor)", [engine, "exec", container, "true"]),
+        ("hyprcross --version", [hyprcross, "--version"]),
+    ]
+    results = []
+    for name, argv in cases:
+        r = measure(argv, args.runs)
+        print(f"{name:<58} median {r['median_ms']:7.1f} ms   fastest {r['min_ms']:7.1f} ms")
+        results.append({"case": name, **r})
+
+    report = {
+        "runs": args.runs,
+        "target": args.target,
+        "environment": {
+            "cpu": cpu_model(),
+            "kernel": platform.release(),
+            "engine": version([engine, "--version"]),
+            "rustc": version(["rustc", "--version"]),
+            "rune": version([rune, "--version"]),
+            "hyprcross": version([hyprcross, "--version"]),
+        },
+        "results": results,
     }
-    print(f"System: {specs['cpu']} ({specs['cores']} threads)")
-    print(f"OS: {specs['os']} (Kernel {specs['kernel']})")
-    print(f"Toolchains: {specs['rustc']} | {specs['podman']}")
-    print("-" * 70)
+    out = ROOT / "benches" / "benchmark_results.json"
+    out.write_text(json.dumps(report, indent=2) + "\n")
+    print(f"written to {out.relative_to(ROOT)}", file=sys.stderr)
 
-    work_dir = Path("/tmp/hyprcross_bench_project")
-    if work_dir.exists():
-        shutil.rmtree(work_dir)
-    work_dir.mkdir(parents=True)
-    setup_test_project(work_dir)
-
-    results = {"specs": specs, "target": TARGET, "benchmarks": {}}
-
-    # 1. Warm daemon start/stop lifecycle
-    print("\n[1] Container Lifecycle")
-    # ensure stopped
-    subprocess.run(["hyprcross", "daemon", "stop", "--target", TARGET], cwd=work_dir, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    
-    results["benchmarks"]["daemon_start"] = bench("Daemon Warm Container Start", lambda: run_cmd(["hyprcross", "daemon", "start", "--target", TARGET], cwd=work_dir), runs=2, warmup=0)
-    results["benchmarks"]["daemon_status"] = bench("Daemon Status Query", lambda: run_cmd(["hyprcross", "daemon", "status"], cwd=work_dir))
-
-    # Pre-build dependencies once so incremental/null benchmarks measure toolchain overhead
-    print("\n[2] Warming Cargo Dependencies in Container...")
-    run_cmd(["hyprcross", "build", "--target", TARGET, "--daemon"], cwd=work_dir)
-
-    print("\n[3] Null Check Latency (cargo check with zero changes)")
-    results["benchmarks"]["null_check_daemon"] = bench("hyprcross check (Warm Daemon)", lambda: run_cmd(["hyprcross", "check", "--target", TARGET, "--daemon"], cwd=work_dir))
-    results["benchmarks"]["null_check_cold"] = bench("hyprcross check (Cold Container --no-daemon)", lambda: run_cmd(["hyprcross", "check", "--target", TARGET, "--no-daemon"], cwd=work_dir))
-
-    print("\n[4] Null Build Latency (cargo build with zero changes)")
-    results["benchmarks"]["null_build_daemon"] = bench("hyprcross build (Warm Daemon)", lambda: run_cmd(["hyprcross", "build", "--target", TARGET, "--daemon"], cwd=work_dir))
-    results["benchmarks"]["null_build_cold"] = bench("hyprcross build (Cold Container --no-daemon)", lambda: run_cmd(["hyprcross", "build", "--target", TARGET, "--no-daemon"], cwd=work_dir))
-
-    print("\n[5] Incremental Build & Link Latency (touch src/main.rs)")
-    def touch_main():
-        main_rs = work_dir / "src" / "main.rs"
-        main_rs.touch()
-
-    def run_inc_hyprlnk_daemon():
-        touch_main()
-        return run_cmd(["hyprcross", "build", "--target", TARGET, "--linker", "hyprlnk", "--daemon"], cwd=work_dir)
-
-    def run_inc_default_daemon():
-        touch_main()
-        return run_cmd(["hyprcross", "build", "--target", TARGET, "--linker", "default", "--daemon"], cwd=work_dir)
-
-    def run_inc_hyprlnk_cold():
-        touch_main()
-        return run_cmd(["hyprcross", "build", "--target", TARGET, "--linker", "hyprlnk", "--no-daemon"], cwd=work_dir)
-
-    def run_inc_default_cold():
-        touch_main()
-        return run_cmd(["hyprcross", "build", "--target", TARGET, "--linker", "default", "--no-daemon"], cwd=work_dir)
-
-    results["benchmarks"]["incremental_hyprlnk_daemon"] = bench("Incremental Build + hyprlnk (Warm Daemon)", run_inc_hyprlnk_daemon)
-    results["benchmarks"]["incremental_default_daemon"] = bench("Incremental Build + GNU ld (Warm Daemon)", run_inc_default_daemon)
-    results["benchmarks"]["incremental_hyprlnk_cold"] = bench("Incremental Build + hyprlnk (Cold Container)", run_inc_hyprlnk_cold)
-    results["benchmarks"]["incremental_default_cold"] = bench("Incremental Build + GNU ld (Cold Container)", run_inc_default_cold)
-
-    print("\n[6] Target Test Execution (QEMU Emulation)")
-    results["benchmarks"]["test_qemu_daemon"] = bench("hyprcross test (QEMU, Warm Daemon)", lambda: run_cmd(["hyprcross", "test", "--target", TARGET, "--daemon"], cwd=work_dir))
-    results["benchmarks"]["test_qemu_cold"] = bench("hyprcross test (QEMU, Cold Container)", lambda: run_cmd(["hyprcross", "test", "--target", TARGET, "--no-daemon"], cwd=work_dir))
-
-    print("\n[7] Target Binary Execution (hyprcross run)")
-    results["benchmarks"]["run_qemu_daemon"] = bench("hyprcross run (QEMU, Warm Daemon)", lambda: run_cmd(["hyprcross", "run", "--target", TARGET, "--daemon"], cwd=work_dir))
-
-    print("\n[8] Daemon Teardown")
-    results["benchmarks"]["daemon_stop"] = bench("Daemon Stop & Remove (-t 0)", lambda: run_cmd(["hyprcross", "daemon", "stop", "--target", TARGET], cwd=work_dir), runs=2, warmup=0)
-
-    # Save output
-    out_json = Path(__file__).parent / "benchmark_results.json"
-    with open(out_json, "w") as f:
-        json.dump(results, f, indent=2)
-    print(f"\nSaved raw results to: {out_json}")
-
-    # Cleanup
-    shutil.rmtree(work_dir, ignore_errors=True)
-    print("=" * 70)
 
 if __name__ == "__main__":
     main()
