@@ -42,7 +42,7 @@ jobs:
       # hyprlnk, which hyprcross links with, is a submodule. While it is private the workflow's
       # own token can't read it: HYPRLNK_TOKEN, with read access to both repositories, can.
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           submodules: recursive
           token: ${{ secrets.HYPRLNK_TOKEN || github.token }}

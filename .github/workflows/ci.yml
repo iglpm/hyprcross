@@ -25,7 +25,7 @@ jobs:
     steps:
       # hyprlnk, which hyprcross links with, is a submodule. While it is private the workflow's
       # own token can't read it: HYPRLNK_TOKEN, with read access to both repositories, can.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           submodules: recursive
           token: ${{ secrets.HYPRLNK_TOKEN || github.token }}
@@ -52,7 +52,7 @@ jobs:
     name: Image scripts
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: shellcheck
         working-directory: docker
         run: shellcheck -x scripts/*.sh scripts/hyprcross-runner matrix.sh update-pins.sh
