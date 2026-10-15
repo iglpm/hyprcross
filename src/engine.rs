@@ -1,15 +1,44 @@
-use anyhow::{bail, Result};
+//! Where a build runs (on the host, or in a container) and running it there.
+
+use anyhow::{Result, bail};
+use colored::Colorize;
 use std::fs;
+use std::io::IsTerminal;
 use std::path::Path;
 use std::time::Instant;
 
-use crate::builder::Builder;
+use crate::builder::{Builder, find_executable};
 use crate::config::Config;
-use crate::container::{ContainerEngine, ContainerRunner};
-use crate::daemon::ContainerDaemon;
-use crate::direct::DirectEngine;
-use crate::targets::TargetInfo;
+use crate::container::{ContainerEngine, ContainerRunner, command_env};
+use crate::daemon::{ContainerDaemon, Job};
+use crate::direct::{DirectEngine, host_c_compiler};
+use crate::targets::{TargetEnv, TargetInfo, TargetOs, current_host_triple};
 use crate::ui;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Engine {
+    Direct,
+    Container,
+}
+
+impl Engine {
+    pub fn name(self) -> &'static str {
+        match self {
+            Engine::Direct => "direct",
+            Engine::Container => "container",
+        }
+    }
+}
+
+/// Whether output goes to a terminal: then builds in containers run on a pseudo-terminal too.
+pub fn on_terminal() -> bool {
+    std::io::stdout().is_terminal() && std::io::stderr().is_terminal()
+}
+
+/// (rows, columns) of the terminal.
+pub fn terminal_size() -> (u16, u16) {
+    console::Term::stdout().size_checked().unwrap_or((24, 80))
+}
 
 pub struct ExecutionContext {
     pub target: TargetInfo,
@@ -29,9 +58,8 @@ impl ExecutionContext {
         linker_override: Option<String>,
         daemon_override: Option<bool>,
     ) -> Self {
-        let target = TargetInfo::parse(target_triple);
         Self {
-            target,
+            target: TargetInfo::parse(target_triple),
             config,
             builder,
             engine_override,
@@ -40,8 +68,8 @@ impl ExecutionContext {
         }
     }
 
-    /// Determine whether hyprlnk should be used for this build
-    pub fn should_use_hyprlnk(&self) -> bool {
+    /// Whether hyprlnk is the chosen linker (`--linker`, the target's or the build's setting).
+    pub fn prefers_hyprlnk(&self) -> bool {
         let pref = self
             .linker_override
             .as_deref()
@@ -51,122 +79,264 @@ impl ExecutionContext {
                     .and_then(|t| t.linker.as_deref())
             })
             .unwrap_or(&self.config.build.linker);
-
-        pref == "hyprlnk" && self.target.hyprlnk_supported
+        pref == "hyprlnk"
     }
 
-    /// Select execution engine mode: "direct" or "container"
-    pub fn decide_engine(&self) -> String {
-        if let Some(e) = &self.engine_override {
-            return e.clone();
-        }
+    /// Whether hyprlnk links this build: chosen, and able to link the target.
+    pub fn should_use_hyprlnk(&self) -> bool {
+        self.prefers_hyprlnk() && self.target.hyprlnk_supported
+    }
 
-        if let Some(tc) = self.config.get_target(&self.target.triple)
-            && let Some(e) = &tc.engine {
-                return e.clone();
-            }
-
-        match self.config.build.engine.as_str() {
-            "direct" => "direct".to_string(),
-            "container" => "container".to_string(),
-            _ => {
-                // If direct mode is natively supported and container engine is not strictly required,
-                // prefer direct mode for 0ms startup!
-                if self.target.direct_supported {
-                    "direct".to_string()
-                } else {
-                    "container".to_string()
-                }
-            }
+    pub fn decide_engine(&self) -> Result<Engine> {
+        let pref = self
+            .engine_override
+            .clone()
+            .or_else(|| {
+                self.config
+                    .get_target(&self.target.triple)
+                    .and_then(|t| t.engine.clone())
+            })
+            .unwrap_or_else(|| self.config.build.engine.clone());
+        match pref.as_str() {
+            "direct" => Ok(Engine::Direct),
+            "container" => Ok(Engine::Container),
+            "auto" | "" => Ok(auto_engine(&self.target, &self.config)),
+            other => bail!("unknown engine `{other}`: expected `auto`, `direct` or `container`"),
         }
     }
 
-    /// Run the given subcommand with arguments
     pub fn run_command(&self, subcommand: &str, extra_args: &[String]) -> Result<i32> {
         let start = Instant::now();
-        let engine_choice = self.decide_engine();
-        let use_hyprlnk = self.should_use_hyprlnk();
+        let engine = self.decide_engine()?;
+        let hyprlnk = self.prefers_hyprlnk();
 
-        let code = match engine_choice.as_str() {
-            "direct" => {
-                let direct = DirectEngine::new(&self.target, &self.config, &self.builder, use_hyprlnk);
-                direct.execute(subcommand, extra_args)?
-            }
-            "container" => {
-                let container_engine = ContainerEngine::detect(&self.config.build.container_engine)?;
-                let use_daemon = self
-                    .daemon_override
-                    .unwrap_or(self.config.build.daemon);
+        let mut details = vec![engine.name(), self.builder.kind.name()];
+        if self.should_use_hyprlnk() {
+            details.push("hyprlnk");
+        }
+        ui::action(
+            verb(subcommand),
+            format!(
+                "{} {}",
+                self.target.triple.bold(),
+                ui::dim(format!("· {}", details.join(" · ")))
+            ),
+        );
 
-                if use_daemon && container_engine.check_service_available() {
-                    let daemon = ContainerDaemon::new(
-                        &container_engine,
-                        &self.target,
-                        &self.config,
-                        &self.builder,
-                        use_hyprlnk,
-                    );
-                    daemon.execute(subcommand, extra_args)?
-                } else {
-                    let runner = ContainerRunner::new(
-                        &container_engine,
-                        &self.target,
-                        &self.config,
-                        &self.builder,
-                        use_hyprlnk,
-                    );
-                    runner.execute(subcommand, extra_args)?
-                }
-            }
-            other => bail!("Unknown engine mode `{other}`: expected `direct` or `container`"),
+        let code = match engine {
+            Engine::Direct => DirectEngine::new(&self.target, &self.config, &self.builder, hyprlnk)
+                .execute(subcommand, extra_args)?,
+            Engine::Container => self.run_in_container(subcommand, extra_args, hyprlnk)?,
         };
 
-        ui::timing(&format!("{subcommand} for {}", self.target.triple), start.elapsed());
+        if code != 0 {
+            self.explain_failure(engine, code);
+        }
+        ui::trace(format!(
+            "{subcommand} took {} in all",
+            ui::secs(start.elapsed())
+        ));
         Ok(code)
+    }
+
+    fn run_in_container(
+        &self,
+        subcommand: &str,
+        extra_args: &[String],
+        hyprlnk: bool,
+    ) -> Result<i32> {
+        let engine = ContainerEngine::detect(&self.config.build.container_engine)?;
+        let cwd = std::env::current_dir()?;
+        if subcommand != "clean" {
+            crate::workspace::ensure_rustup_target(&cwd, &self.target.triple)?;
+        }
+        let mut args = self.builder.args(subcommand, &self.target.triple, hyprlnk);
+        args.extend(extra_args.iter().cloned());
+        // Programs and tests may read their input; builds never do.
+        let stdin = matches!(subcommand, "run" | "test" | "bench");
+        let program = self.builder.kind.name();
+
+        let use_daemon = self.daemon_override.unwrap_or(self.config.build.daemon);
+        if use_daemon && engine.check_service_available() {
+            let daemon = ContainerDaemon::new(&engine, &self.target, &self.config, &self.builder)?;
+            let env = command_env(
+                &self.target,
+                &self.config,
+                &self.builder,
+                hyprlnk,
+                on_terminal(),
+            );
+            daemon.execute(Job {
+                program,
+                args: &args,
+                env,
+                cwd: &cwd,
+                stdin,
+            })
+        } else {
+            ContainerRunner::new(&engine, &self.target, &self.config, &self.builder, hyprlnk)
+                .execute(program, &args, stdin)
+        }
+    }
+
+    fn explain_failure(&self, engine: Engine, code: i32) {
+        let t = &self.target;
+        if engine == Engine::Direct
+            && !t.is_host()
+            && host_c_compiler(t).is_none()
+            && !t.links_without_c_toolchain()
+        {
+            ui::hint(format!(
+                "this machine has no C compiler for {} (it would be {}); `--engine container` \
+                 builds in an image that has one",
+                t.triple,
+                t.c_compiler_candidates()
+                    .first()
+                    .map_or("unknown", String::as_str),
+            ));
+        } else if code == 127 && engine == Engine::Container {
+            ui::hint(format!(
+                "`{}` could not be run in the container: the image may lack what it needs",
+                self.builder.kind.name()
+            ));
+        }
     }
 }
 
-/// Initialize a new Hyprcross.toml in the current directory
+fn verb(subcommand: &str) -> &'static str {
+    match subcommand {
+        "build" => "building",
+        "check" => "checking",
+        "test" => "testing",
+        "run" => "running",
+        "bench" => "benchmarking",
+        "clippy" => "linting",
+        "doc" => "documenting",
+        "clean" => "cleaning",
+        _ => "running",
+    }
+}
+
+/// `auto`: on the host when it can build the target (its own target, one that needs no C
+/// toolchain, or one whose C compiler is installed), in a container when there is an image and
+/// an engine to run it, else on the host anyway.
+pub fn auto_engine(target: &TargetInfo, config: &Config) -> Engine {
+    let host = TargetInfo::parse(current_host_triple());
+    let same_os_family = match (&target.os, &host.os) {
+        (TargetOs::MacOS, TargetOs::MacOS) => true,
+        (TargetOs::Windows, TargetOs::Windows) => target.env == TargetEnv::Msvc,
+        _ => false,
+    };
+    if target.is_host() || same_os_family || target.links_without_c_toolchain() {
+        return Engine::Direct;
+    }
+    if host_c_compiler(target).is_some() {
+        return Engine::Direct;
+    }
+    let tc = config.get_target(&target.triple);
+    let has_image = target.has_prebuilt_image()
+        || tc.is_some_and(|t| t.image.is_some() || t.dockerfile.is_some());
+    let has_engine = ContainerEngine::detect(&config.build.container_engine).is_ok();
+    if has_image && has_engine {
+        Engine::Container
+    } else {
+        Engine::Direct
+    }
+}
+
+/// Write a Hyprcross.toml for `target` in the current directory.
 pub fn init_project(target: Option<&str>) -> Result<()> {
     let path = Path::new("Hyprcross.toml");
     if path.exists() {
-        ui::warn("Hyprcross.toml already exists in this directory");
+        ui::warn("Hyprcross.toml already exists here; leaving it as it is");
         return Ok(());
     }
-
     let default_target = target.unwrap_or("aarch64-unknown-linux-gnu");
     let content = format!(
-r#"# Hyprcross configuration
-# Documentation: https://github.com/runepm/hyprcross
+        r#"# hyprcross: https://github.com/runepm/hyprcross
 
 [build]
-# Execution engine: "auto" (direct when possible, container otherwise), "direct", or "container"
+# "auto": on this machine when it can build the target, in a container otherwise.
+# "direct" or "container" to always use one.
 engine = "auto"
 
-# Linker acceleration: "hyprlnk" (2x-4x faster linking) or "default"
+# "hyprlnk", the linker built into hyprcross and Rune, or "default".
 linker = "hyprlnk"
 
-# Build orchestrator: "auto" (uses Rune CAS if installed, otherwise Cargo), "rune", or "cargo"
+# "auto" (Rune if it is installed, else Cargo), "rune" or "cargo".
 builder = "auto"
 
-# Keep container warm in background for instant sub-20ms invocations
+# Keep a warm container per target, so container builds start instantly.
 daemon = true
 
-# Default target when --target is omitted
+# The target when --target is left out.
 default_target = "{default_target}"
 
+# Where the per-target images come from: <image_repository>/<target>:<image_tag>.
+# image_repository = "ghcr.io/runepm/hyprcross"
+# image_tag = "latest"
+
 [target.{default_target}]
-# Pre-built cross image
-image = "ghcr.io/cross-rs/{default_target}:edge"
+# An image of your own instead of hyprcross':
+# image = "my-image:tag"
+# or one built from a Dockerfile (FROM $HYPRCROSS_BASE_IMAGE to extend hyprcross'):
+# dockerfile = "docker/Dockerfile.cross"
 
-# Environment variables
-# env = {{ MY_VAR = "value" }}
+# Commands run as root when the warm container is created:
+# pre_build = ["apt-get update && apt-get install -y libssl-dev:arm64"]
 
-# Custom volume mounts
-# volumes = ["/host/path:/container/path:ro"]
-"#);
-
+# Variables for the build:
+# env = {{ OPENSSL_STATIC = "1" }}
+"#
+    );
     fs::write(path, content)?;
-    ui::success("init", "Created Hyprcross.toml with hyper-accelerated defaults");
+    ui::success(format!("created Hyprcross.toml for {default_target}"));
     Ok(())
+}
+
+/// Whether a container engine is on PATH at all.
+pub fn any_container_engine() -> bool {
+    crate::container::ContainerEngineKind::ALL
+        .iter()
+        .any(|k| find_executable(k.name()).is_some())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_host_and_targets_without_c_toolchains_build_directly() {
+        let config = Config::default();
+        for t in [
+            current_host_triple(),
+            "wasm32-unknown-unknown",
+            "thumbv7em-none-eabihf",
+            "wasm32-wasip1",
+        ] {
+            assert_eq!(
+                auto_engine(&TargetInfo::parse(t), &config),
+                Engine::Direct,
+                "{t}"
+            );
+        }
+    }
+
+    #[test]
+    fn explicit_engines_win() {
+        let builder = Builder {
+            kind: crate::builder::BuilderKind::Cargo,
+            path: "cargo".into(),
+        };
+        let ctx = ExecutionContext::new(
+            "aarch64-unknown-linux-gnu",
+            Config::default(),
+            builder,
+            Some("container".into()),
+            Some("default".into()),
+            None,
+        );
+        assert_eq!(ctx.decide_engine().unwrap(), Engine::Container);
+        assert!(!ctx.should_use_hyprlnk());
+    }
 }
