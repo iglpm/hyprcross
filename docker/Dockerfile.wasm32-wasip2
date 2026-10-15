@@ -1,0 +1,28 @@
+# syntax=docker/dockerfile:1
+# hyprcross image for wasm32-wasip2: WebAssembly WASI preview 2 (wasi-sdk, Wasmtime to run tests)
+# hyprcross:platforms linux/amd64
+# hyprcross:smoke test
+FROM ubuntu:24.04
+
+# CI passes the week: once a week the package layers below are rebuilt with that week's updates.
+ARG HYPRCROSS_REFRESH=local
+
+COPY scripts/lib.sh scripts/common.sh scripts/install.sh /hyprcross/scripts/
+RUN /hyprcross/scripts/common.sh
+
+COPY scripts/wasi.sh /hyprcross/scripts/
+RUN /hyprcross/scripts/wasi.sh
+
+COPY scripts/hyprcross-runner /usr/local/bin/
+
+ENV CARGO_TARGET_WASM32_WASIP2_RUNNER="hyprcross-runner wasmtime" \
+    CC_wasm32_wasip2="/opt/wasi-sdk/bin/wasm32-wasip2-clang" \
+    CXX_wasm32_wasip2="/opt/wasi-sdk/bin/wasm32-wasip2-clang++" \
+    AR_wasm32_wasip2="/opt/wasi-sdk/bin/llvm-ar" \
+    BINDGEN_EXTRA_CLANG_ARGS_wasm32_wasip2="--sysroot=/opt/wasi-sdk/share/wasi-sysroot"
+
+LABEL org.opencontainers.image.title="hyprcross wasm32-wasip2" \
+      org.opencontainers.image.description="WebAssembly WASI preview 2 (wasi-sdk, Wasmtime to run tests), for hyprcross" \
+      org.opencontainers.image.source="https://github.com/runepm/hyprcross" \
+      org.opencontainers.image.licenses="MIT OR Apache-2.0" \
+      dev.hyprcross.target="wasm32-wasip2"

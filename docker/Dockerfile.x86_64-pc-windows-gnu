@@ -1,0 +1,35 @@
+# syntax=docker/dockerfile:1
+# hyprcross image for x86_64-pc-windows-gnu: Windows x64 (MinGW-w64, Wine to run tests)
+# hyprcross:platforms linux/amd64
+# hyprcross:smoke test
+FROM ubuntu:24.04
+
+# CI passes the week: once a week the package layers below are rebuilt with that week's updates.
+ARG HYPRCROSS_REFRESH=local
+
+COPY scripts/lib.sh scripts/common.sh scripts/install.sh /hyprcross/scripts/
+RUN /hyprcross/scripts/common.sh
+
+RUN /hyprcross/scripts/install.sh g++-mingw-w64-x86-64
+# The POSIX-threads flavour: C++ dependencies using std::thread need it. Its runtime DLLs
+# get a stable path for WINEPATH.
+RUN ln -s /usr/lib/gcc/x86_64-w64-mingw32/*-posix /usr/lib/gcc/x86_64-w64-mingw32/posix
+
+COPY scripts/wine.sh /hyprcross/scripts/
+RUN /hyprcross/scripts/wine.sh x86_64
+
+COPY scripts/hyprcross-runner /usr/local/bin/
+
+ENV CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER="x86_64-w64-mingw32-gcc-posix" \
+    CARGO_TARGET_X86_64_PC_WINDOWS_GNU_RUNNER="hyprcross-runner wine" \
+    CC_x86_64_pc_windows_gnu="x86_64-w64-mingw32-gcc-posix" \
+    CXX_x86_64_pc_windows_gnu="x86_64-w64-mingw32-g++-posix" \
+    AR_x86_64_pc_windows_gnu="x86_64-w64-mingw32-ar" \
+    BINDGEN_EXTRA_CLANG_ARGS_x86_64_pc_windows_gnu="--sysroot=/usr/x86_64-w64-mingw32" \
+    WINEPATH="Z:\\usr\\lib\\gcc\\x86_64-w64-mingw32\\posix;Z:\\usr\\x86_64-w64-mingw32\\lib"
+
+LABEL org.opencontainers.image.title="hyprcross x86_64-pc-windows-gnu" \
+      org.opencontainers.image.description="Windows x64 (MinGW-w64, Wine to run tests), for hyprcross" \
+      org.opencontainers.image.source="https://github.com/runepm/hyprcross" \
+      org.opencontainers.image.licenses="MIT OR Apache-2.0" \
+      dev.hyprcross.target="x86_64-pc-windows-gnu"

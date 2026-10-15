@@ -1,0 +1,22 @@
+# syntax=docker/dockerfile:1
+# hyprcross image for thumbv6m-none-eabi: Bare-metal Cortex-M0/M0+/M1 (Arm GNU toolchain, newlib)
+# hyprcross:platforms linux/amd64
+# hyprcross:smoke build
+FROM ubuntu:24.04
+
+# CI passes the week: once a week the package layers below are rebuilt with that week's updates.
+ARG HYPRCROSS_REFRESH=local
+
+COPY scripts/lib.sh scripts/common.sh scripts/install.sh /hyprcross/scripts/
+RUN /hyprcross/scripts/common.sh
+
+RUN /hyprcross/scripts/install.sh gcc-arm-none-eabi libnewlib-arm-none-eabi
+
+ENV CC_thumbv6m_none_eabi="arm-none-eabi-gcc" \
+    AR_thumbv6m_none_eabi="arm-none-eabi-ar"
+
+LABEL org.opencontainers.image.title="hyprcross thumbv6m-none-eabi" \
+      org.opencontainers.image.description="Bare-metal Cortex-M0/M0+/M1 (Arm GNU toolchain, newlib), for hyprcross" \
+      org.opencontainers.image.source="https://github.com/runepm/hyprcross" \
+      org.opencontainers.image.licenses="MIT OR Apache-2.0" \
+      dev.hyprcross.target="thumbv6m-none-eabi"

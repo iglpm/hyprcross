@@ -1,0 +1,33 @@
+# syntax=docker/dockerfile:1
+# hyprcross image for sparc64-unknown-linux-gnu: Linux SPARC64 (glibc 2.39)
+# hyprcross:platforms linux/amd64
+# hyprcross:smoke test
+FROM ubuntu:24.04
+
+# CI passes the week: once a week the package layers below are rebuilt with that week's updates.
+ARG HYPRCROSS_REFRESH=local
+
+COPY scripts/lib.sh scripts/common.sh scripts/install.sh /hyprcross/scripts/
+RUN /hyprcross/scripts/common.sh
+
+COPY scripts/qemu.sh scripts/multiarch.sh /hyprcross/scripts/
+RUN /hyprcross/scripts/qemu.sh sparc64
+
+RUN /hyprcross/scripts/install.sh \
+    g++-sparc64-linux-gnu
+
+COPY scripts/hyprcross-runner /usr/local/bin/
+
+ENV CARGO_TARGET_SPARC64_UNKNOWN_LINUX_GNU_LINKER="sparc64-linux-gnu-gcc" \
+    CARGO_TARGET_SPARC64_UNKNOWN_LINUX_GNU_RUNNER="hyprcross-runner qemu-sparc64" \
+    CC_sparc64_unknown_linux_gnu="sparc64-linux-gnu-gcc" \
+    CXX_sparc64_unknown_linux_gnu="sparc64-linux-gnu-g++" \
+    AR_sparc64_unknown_linux_gnu="sparc64-linux-gnu-ar" \
+    BINDGEN_EXTRA_CLANG_ARGS_sparc64_unknown_linux_gnu="--sysroot=/usr/sparc64-linux-gnu" \
+    QEMU_LD_PREFIX="/usr/sparc64-linux-gnu"
+
+LABEL org.opencontainers.image.title="hyprcross sparc64-unknown-linux-gnu" \
+      org.opencontainers.image.description="Linux SPARC64 (glibc 2.39), for hyprcross" \
+      org.opencontainers.image.source="https://github.com/runepm/hyprcross" \
+      org.opencontainers.image.licenses="MIT OR Apache-2.0" \
+      dev.hyprcross.target="sparc64-unknown-linux-gnu"

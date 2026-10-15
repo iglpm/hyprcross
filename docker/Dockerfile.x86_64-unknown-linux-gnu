@@ -1,0 +1,17 @@
+# syntax=docker/dockerfile:1
+# hyprcross image for x86_64-unknown-linux-gnu: Linux x86-64 (glibc 2.39)
+# hyprcross:platforms linux/amd64
+# hyprcross:smoke test
+FROM ubuntu:24.04
+
+# CI passes the week: once a week the package layers below are rebuilt with that week's updates.
+ARG HYPRCROSS_REFRESH=local
+
+COPY scripts/lib.sh scripts/common.sh scripts/install.sh /hyprcross/scripts/
+RUN /hyprcross/scripts/common.sh
+
+LABEL org.opencontainers.image.title="hyprcross x86_64-unknown-linux-gnu" \
+      org.opencontainers.image.description="Linux x86-64 (glibc 2.39), for hyprcross" \
+      org.opencontainers.image.source="https://github.com/runepm/hyprcross" \
+      org.opencontainers.image.licenses="MIT OR Apache-2.0" \
+      dev.hyprcross.target="x86_64-unknown-linux-gnu"

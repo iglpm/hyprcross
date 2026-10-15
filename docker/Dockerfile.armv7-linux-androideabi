@@ -1,0 +1,29 @@
+# syntax=docker/dockerfile:1
+# hyprcross image for armv7-linux-androideabi: Android ARMv7 (NDK r27c, API 21+)
+# hyprcross:platforms linux/amd64
+# hyprcross:smoke build
+FROM ubuntu:24.04
+
+# CI passes the week: once a week the package layers below are rebuilt with that week's updates.
+ARG HYPRCROSS_REFRESH=local
+
+COPY scripts/lib.sh scripts/common.sh scripts/install.sh /hyprcross/scripts/
+RUN /hyprcross/scripts/common.sh
+
+COPY scripts/android-ndk.sh /hyprcross/scripts/
+RUN /hyprcross/scripts/android-ndk.sh arm-linux-androideabi
+
+ENV ANDROID_NDK_HOME="/opt/android-ndk" \
+    ANDROID_NDK_ROOT="/opt/android-ndk" \
+    PATH="/opt/android-ndk/toolchains/llvm/prebuilt/linux-x86_64/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
+    CARGO_TARGET_ARMV7_LINUX_ANDROIDEABI_LINKER="armv7a-linux-androideabi21-clang" \
+    CC_armv7_linux_androideabi="armv7a-linux-androideabi21-clang" \
+    CXX_armv7_linux_androideabi="armv7a-linux-androideabi21-clang++" \
+    AR_armv7_linux_androideabi="llvm-ar" \
+    RANLIB_armv7_linux_androideabi="llvm-ranlib"
+
+LABEL org.opencontainers.image.title="hyprcross armv7-linux-androideabi" \
+      org.opencontainers.image.description="Android ARMv7 (NDK r27c, API 21+), for hyprcross" \
+      org.opencontainers.image.source="https://github.com/runepm/hyprcross" \
+      org.opencontainers.image.licenses="MIT OR Apache-2.0" \
+      dev.hyprcross.target="armv7-linux-androideabi"

@@ -1,0 +1,36 @@
+# syntax=docker/dockerfile:1
+# hyprcross image for armv7-unknown-linux-gnueabihf: Linux ARMv7 hard-float (glibc 2.39)
+# hyprcross:platforms linux/amd64
+# hyprcross:smoke test
+FROM ubuntu:24.04
+
+# CI passes the week: once a week the package layers below are rebuilt with that week's updates.
+ARG HYPRCROSS_REFRESH=local
+
+COPY scripts/lib.sh scripts/common.sh scripts/install.sh /hyprcross/scripts/
+RUN /hyprcross/scripts/common.sh
+
+COPY scripts/qemu.sh scripts/multiarch.sh /hyprcross/scripts/
+RUN /hyprcross/scripts/qemu.sh arm
+RUN /hyprcross/scripts/multiarch.sh armhf
+
+RUN /hyprcross/scripts/install.sh \
+    g++-arm-linux-gnueabihf
+
+COPY scripts/hyprcross-runner /usr/local/bin/
+
+ENV CARGO_TARGET_ARMV7_UNKNOWN_LINUX_GNUEABIHF_LINKER="arm-linux-gnueabihf-gcc" \
+    CARGO_TARGET_ARMV7_UNKNOWN_LINUX_GNUEABIHF_RUNNER="hyprcross-runner qemu-arm" \
+    CC_armv7_unknown_linux_gnueabihf="arm-linux-gnueabihf-gcc" \
+    CXX_armv7_unknown_linux_gnueabihf="arm-linux-gnueabihf-g++" \
+    AR_armv7_unknown_linux_gnueabihf="arm-linux-gnueabihf-ar" \
+    BINDGEN_EXTRA_CLANG_ARGS_armv7_unknown_linux_gnueabihf="--sysroot=/usr/arm-linux-gnueabihf" \
+    QEMU_LD_PREFIX="/usr/arm-linux-gnueabihf" \
+    PKG_CONFIG_PATH_armv7_unknown_linux_gnueabihf="/usr/lib/arm-linux-gnueabihf/pkgconfig:/usr/share/pkgconfig" \
+    PKG_CONFIG_ALLOW_CROSS_armv7_unknown_linux_gnueabihf="1"
+
+LABEL org.opencontainers.image.title="hyprcross armv7-unknown-linux-gnueabihf" \
+      org.opencontainers.image.description="Linux ARMv7 hard-float (glibc 2.39), for hyprcross" \
+      org.opencontainers.image.source="https://github.com/runepm/hyprcross" \
+      org.opencontainers.image.licenses="MIT OR Apache-2.0" \
+      dev.hyprcross.target="armv7-unknown-linux-gnueabihf"

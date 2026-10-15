@@ -1,0 +1,41 @@
+# syntax=docker/dockerfile:1
+# hyprcross image for armv7-unknown-linux-musleabihf: Linux ARMv7 hard-float (musl 1.2.5, static)
+# hyprcross:platforms linux/amd64
+# hyprcross:smoke test
+
+# The toolchain builds from source in a stage of its own, so its layer is reused until
+# musl.sh or the base image changes.
+FROM ubuntu:24.04 AS toolchain
+
+COPY scripts/lib.sh scripts/common.sh scripts/musl.sh /hyprcross/scripts/
+RUN /hyprcross/scripts/common.sh
+RUN /hyprcross/scripts/musl.sh arm-linux-musleabihf --with-arch=armv7-a --with-fpu=vfpv3-d16 --with-float=hard --with-mode=thumb
+
+FROM ubuntu:24.04
+
+# CI passes the week: once a week the package layers below are rebuilt with that week's updates.
+ARG HYPRCROSS_REFRESH=local
+
+COPY scripts/lib.sh scripts/common.sh scripts/install.sh /hyprcross/scripts/
+RUN /hyprcross/scripts/common.sh
+
+COPY scripts/qemu.sh /hyprcross/scripts/
+RUN /hyprcross/scripts/qemu.sh arm
+
+COPY --from=toolchain /usr/local/musl /usr/local/musl
+COPY scripts/hyprcross-runner /usr/local/bin/
+
+ENV PATH="/usr/local/musl/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
+    CARGO_TARGET_ARMV7_UNKNOWN_LINUX_MUSLEABIHF_LINKER="arm-linux-musleabihf-gcc" \
+    CARGO_TARGET_ARMV7_UNKNOWN_LINUX_MUSLEABIHF_RUNNER="hyprcross-runner qemu-arm" \
+    CC_armv7_unknown_linux_musleabihf="arm-linux-musleabihf-gcc" \
+    CXX_armv7_unknown_linux_musleabihf="arm-linux-musleabihf-g++" \
+    AR_armv7_unknown_linux_musleabihf="arm-linux-musleabihf-ar" \
+    BINDGEN_EXTRA_CLANG_ARGS_armv7_unknown_linux_musleabihf="--sysroot=/usr/local/musl/arm-linux-musleabihf" \
+    QEMU_LD_PREFIX="/usr/local/musl/arm-linux-musleabihf"
+
+LABEL org.opencontainers.image.title="hyprcross armv7-unknown-linux-musleabihf" \
+      org.opencontainers.image.description="Linux ARMv7 hard-float (musl 1.2.5, static), for hyprcross" \
+      org.opencontainers.image.source="https://github.com/runepm/hyprcross" \
+      org.opencontainers.image.licenses="MIT OR Apache-2.0" \
+      dev.hyprcross.target="armv7-unknown-linux-musleabihf"

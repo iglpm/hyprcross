@@ -1,0 +1,84 @@
+name: Image updates
+
+# Once a week, move the upstream tools pinned in docker/scripts (wasi-sdk, Wasmtime,
+# musl-cross-make) to their newest releases and open a pull request. The pull request's checks
+# (CI, and images.yml building and smoke-testing every image) decide whether it merges: this
+# job waits for them and merges when all pass, and that push to main publishes the new images.
+# Package updates need no pull request: images.yml rebuilds every image weekly.
+#
+# Pull requests and pushes made with the workflow's own GITHUB_TOKEN start no workflows. So
+# this only merges with a token of a bot account or GitHub App in HYPRCROSS_BOT_TOKEN; without
+# one the pull request waits for a person, whose closing and reopening it starts its checks.
+
+on:
+  schedule:
+    - cron: "41 2 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  update:
+    name: Update image tools
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: pins
+        name: Newest releases
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          changes="$(docker/update-pins.sh)"
+          {
+            echo "changes<<EOF"
+            echo "$changes"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+          echo "${changes:-everything is up to date}"
+
+      - id: pr
+        if: steps.pins.outputs.changes != ''
+        uses: peter-evans/create-pull-request@v7
+        with:
+          token: ${{ secrets.HYPRCROSS_BOT_TOKEN || secrets.GITHUB_TOKEN }}
+          branch: bot/image-tools
+          delete-branch: true
+          commit-message: |
+            chore(docker): update image tools
+
+            ${{ steps.pins.outputs.changes }}
+          title: "chore(docker): update image tools"
+          body: |
+            Newer upstream releases for the hyprcross images:
+
+            ```
+            ${{ steps.pins.outputs.changes }}
+            ```
+
+            The Images workflow builds every image with them and smoke-tests each one before
+            this can merge.
+          labels: |
+            dependencies
+            docker
+
+      - name: Merge once its checks pass
+        if: steps.pr.outputs.pull-request-number != ''
+        timeout-minutes: 300
+        env:
+          GH_TOKEN: ${{ secrets.HYPRCROSS_BOT_TOKEN }}
+          PR: ${{ steps.pr.outputs.pull-request-number }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::notice::No HYPRCROSS_BOT_TOKEN: pull request #$PR waits for a person."
+            exit 0
+          fi
+          # The checks take a moment to be reported; until then `gh pr checks` finds none.
+          for _ in $(seq 60); do
+            if gh pr checks "$PR" 2>&1 | grep -qv "no checks reported"; then break; fi
+            sleep 10
+          done
+          gh pr checks "$PR" --watch --fail-fast --interval 60
+          gh pr merge "$PR" --squash --delete-branch

@@ -1,0 +1,36 @@
+# syntax=docker/dockerfile:1
+# hyprcross image for i686-unknown-linux-gnu: Linux x86 (glibc 2.39)
+# hyprcross:platforms linux/amd64
+# hyprcross:smoke test
+FROM ubuntu:24.04
+
+# CI passes the week: once a week the package layers below are rebuilt with that week's updates.
+ARG HYPRCROSS_REFRESH=local
+
+COPY scripts/lib.sh scripts/common.sh scripts/install.sh /hyprcross/scripts/
+RUN /hyprcross/scripts/common.sh
+
+COPY scripts/qemu.sh scripts/multiarch.sh /hyprcross/scripts/
+RUN /hyprcross/scripts/qemu.sh i386
+RUN /hyprcross/scripts/multiarch.sh i386
+
+RUN /hyprcross/scripts/install.sh \
+    g++-i686-linux-gnu
+
+COPY scripts/hyprcross-runner /usr/local/bin/
+
+ENV CARGO_TARGET_I686_UNKNOWN_LINUX_GNU_LINKER="i686-linux-gnu-gcc" \
+    CARGO_TARGET_I686_UNKNOWN_LINUX_GNU_RUNNER="hyprcross-runner qemu-i386" \
+    CC_i686_unknown_linux_gnu="i686-linux-gnu-gcc" \
+    CXX_i686_unknown_linux_gnu="i686-linux-gnu-g++" \
+    AR_i686_unknown_linux_gnu="i686-linux-gnu-ar" \
+    BINDGEN_EXTRA_CLANG_ARGS_i686_unknown_linux_gnu="--sysroot=/usr/i686-linux-gnu" \
+    QEMU_LD_PREFIX="/usr/i686-linux-gnu" \
+    PKG_CONFIG_PATH_i686_unknown_linux_gnu="/usr/lib/i686-linux-gnu/pkgconfig:/usr/share/pkgconfig" \
+    PKG_CONFIG_ALLOW_CROSS_i686_unknown_linux_gnu="1"
+
+LABEL org.opencontainers.image.title="hyprcross i686-unknown-linux-gnu" \
+      org.opencontainers.image.description="Linux x86 (glibc 2.39), for hyprcross" \
+      org.opencontainers.image.source="https://github.com/runepm/hyprcross" \
+      org.opencontainers.image.licenses="MIT OR Apache-2.0" \
+      dev.hyprcross.target="i686-unknown-linux-gnu"
