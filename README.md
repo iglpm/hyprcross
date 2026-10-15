@@ -60,6 +60,11 @@ How it's measured, and what changed: [docs/performance.md](docs/performance.md).
 
 ## Install
 
+**With Rune, there is nothing to install:** hyprcross is built into it, as `rune cross` and
+`rune build --cross <target>` (see Rune's
+[cross-compilation guide](https://github.com/runepm/rune/blob/master/docs/cross-compilation.md)).
+On its own, for Cargo:
+
 ```sh
 git clone --recursive https://github.com/runepm/hyprcross   # with hyprlnk, a submodule
 cd hyprcross

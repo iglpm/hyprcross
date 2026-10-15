@@ -19,6 +19,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   sent over a Unix socket, on a pseudo-terminal when the output is a terminal. A warm build
   starts no `podman` or `docker` process: 41 ms for a fully cached build of hyprcross in a
   container, against 149 ms through `podman exec`.
+- Built into Rune as `rune cross` and `--cross`: `run_hosted` runs hyprcross inside another
+  program, which names the command in messages and help, brings itself as the builder, and
+  applies its settings over hyprcross' files (`host::Host`). Without the `builtin-hyprlnk`
+  feature it brings no hyprlnk of its own, for hosts that link with theirs.
 - `hyprcross targets`: the targets with images, how each builds here, what runs its tests.
 - `bench` and `doc`; the aliases `b`, `c`, `t`, `r`.
 - `image_repository` and `image_tag`; `[build.env]` with `passthrough` and `volumes`;

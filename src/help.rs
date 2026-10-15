@@ -1,8 +1,6 @@
 //! `hyprcross help`: a grouped overview in Rune's layout, and clap's help in Rune's colours.
 
-use crate::cli::Cli;
 use crate::ui;
-use clap::{CommandFactory, Parser};
 use colored::Colorize;
 
 const SECTIONS: &[(&str, &[&str])] = &[
@@ -59,23 +57,24 @@ fn has_default_target() -> bool {
 }
 
 fn command_help(path: &[&str]) {
-    let mut argv = vec!["hyprcross"];
-    argv.extend_from_slice(path);
-    argv.push("--help");
-    match Cli::try_parse_from(argv) {
+    let mut argv: Vec<std::ffi::OsString> = vec![crate::host::command().into()];
+    argv.extend(path.iter().map(Into::into));
+    argv.push("--help".into());
+    match crate::cli::try_parse(&argv) {
         Err(e) if e.kind() == clap::error::ErrorKind::DisplayHelp => {
             let _ = e.print();
         }
         _ => {
             ui::error(format!("no such command: `{}`", path.join(" ")));
-            ui::hint("`hyprcross help` lists them");
+            ui::hint(format!("{} lists them", crate::host::invocation("help")));
             std::process::exit(1);
         }
     }
 }
 
 fn overview() {
-    let cmd = Cli::command();
+    let cmd = crate::cli::command();
+    let host = crate::host::command();
     let label = |name: &str| -> (String, usize) {
         let aliases: Vec<&str> = cmd
             .find_subcommand(name)
@@ -100,17 +99,28 @@ fn overview() {
         + 3;
 
     let mut out = Vec::new();
+    let (version, about) = if host == "hyprcross" {
+        (
+            crate::VERSION.to_string(),
+            "cross-compile and cross-test Rust, with Rune or Cargo",
+        )
+    } else {
+        (
+            format!("(hyprcross {})", crate::VERSION),
+            "build, test and run for other targets",
+        )
+    };
     out.push(format!(
         "{} {}  {}",
-        ui::brand("hyprcross"),
-        crate::VERSION.dimmed(),
-        "cross-compile and cross-test Rust, with Rune or Cargo".dimmed()
+        ui::brand(host),
+        version.dimmed(),
+        about.dimmed()
     ));
     out.push(String::new());
     out.push(format!(
         "{}  {} {}",
         "Usage".bold(),
-        "hyprcross".bold(),
+        host.bold(),
         "<command> -t <target> [options] [-- builder arguments]".dimmed()
     ));
     for (title, names) in SECTIONS {
@@ -134,7 +144,7 @@ fn overview() {
     for (flag, what) in [
         (
             "-t, --target <triple>",
-            "Target to build for (else build.default_target)",
+            "Target to build for (else the default target)",
         ),
         ("--engine <engine>", "auto, direct or container"),
         ("--builder <tool>", "auto, rune or cargo"),
@@ -144,9 +154,9 @@ fn overview() {
             "Fresh container per build instead of a warm one",
         ),
         ("-q, --quiet", "Only print errors"),
-        ("-v, --verbose", "Print the commands hyprcross runs"),
+        ("-v, --verbose", "Print the commands it runs"),
         ("--color <when>", "auto, always or never"),
-        ("-h, --help", "Help for hyprcross, or for a command"),
+        ("-h, --help", "Help, or help for a command"),
         ("-V, --version", "Print the version"),
     ] {
         out.push(format!(
@@ -158,7 +168,7 @@ fn overview() {
     out.push(String::new());
     out.push(format!(
         "{}  {}",
-        "hyprcross help <command>".bold(),
+        format!("{host} help <command>").bold(),
         "options and examples for one command".dimmed()
     ));
     println!("{}", out.join("\n"));
@@ -181,16 +191,26 @@ pub fn styles() -> clap::builder::Styles {
         )
 }
 
-/// An "Examples:" section for a command's help.
+/// An "Examples:" section for a command's help; `hyprcross` in them becomes the host's command.
 pub fn examples(rows: &[(&str, &str)]) -> String {
     use clap::builder::styling::{Ansi256Color, Color, Style};
     let header = Style::new()
         .bold()
         .fg_color(Some(Color::Ansi256(Ansi256Color(141))));
     let literal = Style::new().bold();
+    let rows: Vec<(String, &str)> = rows
+        .iter()
+        .map(|(cmd, what)| {
+            let cmd = match cmd.strip_prefix("hyprcross ") {
+                Some(rest) => format!("{} {rest}", crate::host::command()),
+                None => cmd.to_string(),
+            };
+            (cmd, *what)
+        })
+        .collect();
     let width = rows.iter().map(|(c, _)| c.len()).max().unwrap_or(0) + 3;
     let mut out = format!("{}Examples:{}\n", header.render(), header.render_reset());
-    for (cmd, what) in rows {
+    for (cmd, what) in &rows {
         out.push_str(&format!(
             "  {}{cmd}{}{:pad$}{what}\n",
             literal.render(),
@@ -205,6 +225,8 @@ pub fn examples(rows: &[(&str, &str)]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cli::Cli;
+    use clap::CommandFactory;
 
     #[test]
     fn every_visible_command_is_in_the_overview() {

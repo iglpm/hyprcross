@@ -12,6 +12,7 @@ pub mod direct;
 pub mod doctor;
 pub mod engine;
 pub mod help;
+pub mod host;
 pub mod hyprlnk_driver;
 pub mod qemu;
 pub mod targets;
@@ -19,12 +20,11 @@ pub mod ui;
 pub mod workspace;
 
 use anyhow::{Result, bail};
-use clap::Parser;
 use colored::Colorize;
 use std::ffi::OsString;
 
 use crate::builder::Builder;
-use crate::cli::{Cli, Commands, CommonArgs, DaemonAction, ImagesAction, SharedBuildOpts};
+use crate::cli::{Commands, CommonArgs, DaemonAction, ImagesAction, SharedBuildOpts};
 use crate::config::Config;
 use crate::container::ContainerEngine;
 use crate::engine::{ExecutionContext, auto_engine, init_project};
@@ -47,13 +47,24 @@ pub fn run() -> Result<i32> {
     if args.get(1).is_some_and(|a| a == "hyprcross") {
         args.remove(1);
     }
+    dispatch(args)
+}
+
+/// Run hyprcross inside another program (`rune cross`): `args` as hyprcross would get them,
+/// the first one naming the command (`rune cross`); the exit code.
+pub fn run_hosted(args: Vec<OsString>, host: host::Host) -> Result<i32> {
+    host::set(host);
+    dispatch(args)
+}
+
+fn dispatch(args: Vec<OsString>) -> Result<i32> {
     apply_color_flag(&args);
     if help::intercept(&args) {
         return Ok(0);
     }
     let args = hoist_own_options(args);
 
-    let cli = match Cli::try_parse_from(&args) {
+    let cli = match cli::try_parse(&args) {
         Ok(cli) => cli,
         Err(e) => {
             let _ = e.print();
@@ -88,7 +99,10 @@ pub fn run() -> Result<i32> {
             Ok(0)
         }
         Some(Commands::Init(a)) => {
-            init_project(a.target.as_deref())?;
+            match host::get().init {
+                Some(init) => init(a.target.as_deref())?,
+                None => init_project(a.target.as_deref())?,
+            }
             Ok(0)
         }
         Some(Commands::Daemon(a)) => {
@@ -209,8 +223,11 @@ fn target_of(opts: &SharedBuildOpts, outer: &SharedBuildOpts, config: &Config) -
         .ok_or_else(|| {
             ui::Hinted::error(
                 "no target given",
-                "pass one with `--target <triple>` (`hyprcross targets` lists those with \
-                 images), or set `default_target` in Hyprcross.toml",
+                format!(
+                    "pass one with `--target <triple>` ({} lists those with images), or set {}",
+                    host::invocation("targets"),
+                    host::get().default_target_setting
+                ),
             )
         })
 }
@@ -375,11 +392,16 @@ fn daemon_command(action: DaemonAction, config: Config) -> Result<i32> {
                 ));
             }
             if list.iter().any(|c| c.project.is_empty()) {
-                ui::hint(
-                    "containers from an older hyprcross are no longer used: `hyprcross daemon stop --all` removes every container",
-                );
+                ui::hint(format!(
+                    "containers from an older hyprcross are no longer used: {} removes every \
+                     container",
+                    host::invocation("daemon stop --all")
+                ));
             } else if running < list.len() {
-                ui::hint("`hyprcross daemon prune` removes the stopped ones");
+                ui::hint(format!(
+                    "{} removes the stopped ones",
+                    host::invocation("daemon prune")
+                ));
             }
             Ok(0)
         }
@@ -387,7 +409,10 @@ fn daemon_command(action: DaemonAction, config: Config) -> Result<i32> {
             let target = target
                 .or(config.build.default_target.clone())
                 .ok_or_else(|| {
-                    anyhow::anyhow!("which target? `hyprcross daemon start --target <triple>`")
+                    anyhow::anyhow!(
+                        "which target? {}",
+                        host::invocation("daemon start --target <triple>")
+                    )
                 })?;
             let info = TargetInfo::parse(&target);
             let builder = Builder::resolve(&config.build.builder)?;
@@ -483,9 +508,10 @@ fn images_command(action: ImagesAction, config: Config) -> Result<i32> {
                 .collect();
             if rows.is_empty() {
                 ui::err(format!("{} no build images on this machine", ui::dim("·")));
-                ui::hint(
-                    "they are pulled on first use, or with `hyprcross images pull -t <triple>`",
-                );
+                ui::hint(format!(
+                    "they are pulled on first use, or with {}",
+                    host::invocation("images pull -t <triple>")
+                ));
                 return Ok(0);
             }
             let w = rows.iter().map(|r| r.0.len()).max().unwrap_or(0) + 2;

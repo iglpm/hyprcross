@@ -26,8 +26,14 @@ pub struct Builder {
 }
 
 impl Builder {
-    /// `auto` is Rune when it is on PATH, else Cargo.
+    /// `auto` is Rune when it is on PATH, else Cargo; inside Rune (`rune cross`), `auto` and
+    /// `rune` are that Rune.
     pub fn resolve(preference: &str) -> Result<Self> {
+        if let Some(own) = &crate::host::get().builder
+            && matches!(preference, "auto" | "" | "rune")
+        {
+            return Ok(own.clone());
+        }
         let found =
             |kind: BuilderKind| find_executable(kind.name()).map(|path| Self { kind, path });
         match preference {

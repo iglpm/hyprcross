@@ -56,6 +56,20 @@ pub struct Cli {
     pub verbose: bool,
 }
 
+/// The command line, named after the host (`hyprcross`, or `rune cross`).
+pub fn command() -> clap::Command {
+    use clap::CommandFactory;
+    let name = crate::host::command();
+    Cli::command().name(name).bin_name(name)
+}
+
+/// Parse `args` (the first naming the command) with [`command`].
+pub fn try_parse(args: &[std::ffi::OsString]) -> Result<Cli, clap::Error> {
+    use clap::FromArgMatches;
+    let matches = command().try_get_matches_from(args)?;
+    Cli::from_arg_matches(&matches)
+}
+
 #[derive(Subcommand, Debug)]
 pub enum Commands {
     /// Compile the package for a target
@@ -98,7 +112,7 @@ pub enum Commands {
     /// Pull and list the build images
     Images(ImagesArgs),
 
-    /// Write a Hyprcross.toml in this directory
+    /// Write a configuration with a default target
     Init(InitArgs),
 
     /// The agent inside a warm container

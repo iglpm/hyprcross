@@ -54,7 +54,7 @@ pub fn run_doctor() {
     let cwd = std::env::current_dir().unwrap_or_else(|_| ".".into());
     ui::err(format!(
         "{} {}",
-        ui::brand("hyprcross doctor"),
+        ui::brand(format!("{} doctor", crate::host::command())),
         ui::dim(format!("· host {}", current_host_triple()))
     ));
 
@@ -84,8 +84,14 @@ pub fn run_doctor() {
         ),
     }
 
-    // The builder.
-    match find_executable("rune") {
+    // The builder: the host itself (`rune cross`), else Rune or Cargo on PATH.
+    let host = crate::host::get();
+    match host
+        .builder
+        .as_ref()
+        .map(|b| b.path.clone())
+        .or_else(|| find_executable("rune"))
+    {
         Some(rune) => {
             let v = version_of(&rune).unwrap_or_else(|| "rune".into());
             r.ok(format!(
@@ -113,16 +119,26 @@ pub fn run_doctor() {
         },
     }
 
-    #[cfg(feature = "builtin-hyprlnk")]
-    r.ok(format!(
-        "hyprlnk {} links ELF, Mach-O and PE/COFF {}",
-        hyprlnk::VERSION,
-        ui::dim("(built in)")
-    ));
-    #[cfg(not(feature = "builtin-hyprlnk"))]
-    match crate::hyprlnk_driver::find_external_hyprlnk() {
-        Some(p) => r.ok(format!("hyprlnk at {}", ui::tilde(&p))),
-        None => r.info("hyprlnk is not built in and not on PATH: builds use the default linkers"),
+    if host.links_with_hyprlnk {
+        let program = host.command.split(' ').next().unwrap_or(host.command);
+        r.ok(format!(
+            "hyprlnk links ELF, Mach-O and PE/COFF {}",
+            ui::dim(format!("(built into {program})"))
+        ));
+    } else {
+        #[cfg(feature = "builtin-hyprlnk")]
+        r.ok(format!(
+            "hyprlnk {} links ELF, Mach-O and PE/COFF {}",
+            hyprlnk::VERSION,
+            ui::dim("(built in)")
+        ));
+        #[cfg(not(feature = "builtin-hyprlnk"))]
+        match crate::hyprlnk_driver::find_external_hyprlnk() {
+            Some(p) => r.ok(format!("hyprlnk at {}", ui::tilde(&p))),
+            None => {
+                r.info("hyprlnk is not built in and not on PATH: builds use the default linkers")
+            }
+        }
     }
 
     // Containers.
@@ -244,7 +260,7 @@ pub fn run_doctor() {
                     "{} warm, {} stopped {}",
                     ui::plural(running, "container"),
                     list.len() - running,
-                    ui::dim("(`hyprcross daemon status`)")
+                    ui::dim(format!("({})", crate::host::invocation("daemon status")))
                 ));
             }
         }

@@ -213,6 +213,10 @@ impl Config {
     /// `[workspace.metadata.hyprcross]` (or `.cross`); then `~/.config/hyprcross/config.toml`.
     pub fn load_from_dir(dir: &Path) -> Result<Self> {
         let mut cfg = Self::load_file_from_dir(dir)?;
+        // The host's settings (Rune's `cross.*`) over the files, under HYPRCROSS_* variables.
+        if let Some(configure) = &crate::host::get().configure {
+            configure(&mut cfg);
+        }
         cfg.apply_env();
         Ok(cfg)
     }
@@ -291,6 +295,60 @@ impl Config {
 
     pub fn get_target(&self, triple: &str) -> Option<&TargetConfig> {
         self.target.get(triple)
+    }
+
+    /// Settings for `triple` from elsewhere (Rune's `[cross.target.<triple>]`) over the ones
+    /// read from the files, field by field.
+    pub fn merge_target(&mut self, triple: &str, other: TargetConfig) {
+        self.target
+            .entry(triple.to_string())
+            .or_default()
+            .merge(other);
+    }
+}
+
+impl TargetConfig {
+    /// `other`'s settings over these: what it sets replaces, what it leaves out stays.
+    pub fn merge(&mut self, other: TargetConfig) {
+        let TargetConfig {
+            image,
+            dockerfile,
+            sysroot,
+            runner,
+            env,
+            volumes,
+            pre_build,
+            linker,
+            engine,
+        } = other;
+        fn keep<T>(mine: &mut Option<T>, theirs: Option<T>) {
+            if theirs.is_some() {
+                *mine = theirs;
+            }
+        }
+        keep(&mut self.image, image);
+        keep(&mut self.dockerfile, dockerfile);
+        keep(&mut self.sysroot, sysroot);
+        keep(&mut self.runner, runner);
+        keep(&mut self.linker, linker);
+        keep(&mut self.engine, engine);
+        if !volumes.is_empty() {
+            self.volumes = volumes;
+        }
+        if !pre_build.is_empty() {
+            self.pre_build = pre_build;
+        }
+        self.env.vars.extend(env.vars);
+        for name in env.passthrough {
+            if !self.env.passthrough.contains(&name) {
+                self.env.passthrough.push(name);
+            }
+        }
+        for name in env.volumes {
+            if !self.env.volumes.contains(&name) {
+                self.env.volumes.push(name);
+            }
+        }
     }
 }
 

@@ -236,7 +236,13 @@ impl ImageRequest {
             }
             msg.push_str(&format!(
                 "\n  • build on this machine instead: --engine direct\n  • or name an image of \
-                 your own in Hyprcross.toml:\n      [target.{}]\n      image = \"my-image:tag\"",
+                 your own in {}:\n      [{}target.{}]\n      image = \"my-image:tag\"",
+                crate::host::get().target_settings,
+                if crate::host::get().builder.is_some() {
+                    "cross."
+                } else {
+                    ""
+                },
                 target.triple
             ));
             bail!(msg);
