@@ -1,6 +1,8 @@
+//! Running target programs on the host for `test` and `run` in direct mode: QEMU user-mode
+//! emulation for Linux targets, Wine for Windows, Wasmtime for WASI.
+
 use crate::builder::find_executable;
-#[allow(unused_imports)]
-use crate::targets::{TargetArch, TargetInfo, TargetOs};
+use crate::targets::{Runner, TargetInfo, TargetOs};
 use std::path::{Path, PathBuf};
 
 pub struct QemuRunner {
@@ -9,77 +11,82 @@ pub struct QemuRunner {
 }
 
 impl QemuRunner {
-    /// Detect or resolve QEMU runner for a given target
-    pub fn resolve(target: &TargetInfo, custom_runner: Option<&str>, sysroot: Option<&Path>) -> Option<Self> {
-        // If user configured an explicit runner in config, prioritize that
+    /// The configured runner, else QEMU for Linux targets (`qemu-<arch>-static`, then
+    /// `qemu-<arch>`), with the target's sysroot for its dynamic loader.
+    pub fn resolve(
+        target: &TargetInfo,
+        custom_runner: Option<&str>,
+        sysroot: Option<&Path>,
+    ) -> Option<Self> {
         if let Some(r) = custom_runner
-            && let Some(path) = find_executable(r) {
-                return Some(Self {
-                    binary: path,
-                    ld_prefix: sysroot.map(Path::to_path_buf),
-                });
-            }
-
-        // QEMU user emulation is primarily used for Linux cross targets
+            && let Some(path) = find_executable(r)
+        {
+            return Some(Self {
+                binary: path,
+                ld_prefix: sysroot.map(Path::to_path_buf),
+            });
+        }
         if target.os != TargetOs::Linux {
             return None;
         }
-
-        // Look for static emulator first (qemu-aarch64-static), then dynamic (qemu-aarch64)
-        if let Some(binary_name) = target.qemu_binary {
-            if let Some(path) = find_executable(binary_name) {
-                let ld_prefix = resolve_sysroot_prefix(target, sysroot);
-                return Some(Self {
-                    binary: path,
-                    ld_prefix,
-                });
-            }
-
-            // Try without `-static` suffix
-            let dynamic_name = binary_name.trim_end_matches("-static");
-            if let Some(path) = find_executable(dynamic_name) {
-                let ld_prefix = resolve_sysroot_prefix(target, sysroot);
-                return Some(Self {
-                    binary: path,
-                    ld_prefix,
-                });
-            }
-        }
-
-        None
+        let name = target.qemu_binary?;
+        let binary =
+            find_executable(name).or_else(|| find_executable(name.trim_end_matches("-static")))?;
+        Some(Self {
+            binary,
+            ld_prefix: resolve_sysroot_prefix(target, sysroot),
+        })
     }
 
-    /// Formulate the command string or runner invocation
     pub fn runner_command(&self) -> String {
-        let bin_str = self.binary.to_string_lossy();
-        if let Some(prefix) = &self.ld_prefix {
-            format!("{bin_str} -L {}", prefix.to_string_lossy())
-        } else {
-            bin_str.to_string()
+        match &self.ld_prefix {
+            Some(prefix) => format!("{} -L {}", self.binary.display(), prefix.display()),
+            None => self.binary.display().to_string(),
         }
     }
 }
 
-/// Check if binfmt_misc kernel module is active and registered for the target architecture
+/// What to set as `CARGO_TARGET_<TRIPLE>_RUNNER` for direct builds, if anything runs the
+/// target's programs here.
+pub fn host_runner_command(
+    target: &TargetInfo,
+    custom: Option<&str>,
+    sysroot: Option<&Path>,
+) -> Option<String> {
+    if let Some(r) = custom {
+        return Some(r.to_string());
+    }
+    match target.host_runner() {
+        Runner::Qemu(_) => QemuRunner::resolve(target, None, sysroot).map(|q| q.runner_command()),
+        Runner::Wine => find_executable("wine").map(|p| p.display().to_string()),
+        Runner::Wasmtime => {
+            find_executable("wasmtime").map(|p| format!("{} run --dir=.", p.display()))
+        }
+        Runner::Native | Runner::None => None,
+    }
+}
+
+/// Whether the kernel runs this architecture's binaries through QEMU by itself.
 #[allow(unused_variables)]
 pub fn is_binfmt_registered(target: &TargetInfo) -> bool {
     #[cfg(target_os = "linux")]
     {
-        let binfmt_dir = Path::new("/proc/sys/fs/binfmt_misc");
-        if !binfmt_dir.is_dir() {
-            return false;
-        }
-
-        let pattern = match target.arch {
-            TargetArch::Aarch64 => "qemu-aarch64",
-            TargetArch::Armv7 | TargetArch::Arm => "qemu-arm",
-            TargetArch::Riscv64 => "qemu-riscv64",
-            TargetArch::Powerpc64le => "qemu-ppc64le",
-            TargetArch::S390x => "qemu-s390x",
+        use crate::targets::TargetArch;
+        let dir = Path::new("/proc/sys/fs/binfmt_misc");
+        let names: &[&str] = match target.arch {
+            TargetArch::Aarch64 => &["qemu-aarch64"],
+            TargetArch::Armv7 | TargetArch::Arm => &["qemu-arm"],
+            TargetArch::Riscv64 => &["qemu-riscv64"],
+            TargetArch::Powerpc64le => &["qemu-ppc64le"],
+            TargetArch::Powerpc64 => &["qemu-ppc64"],
+            TargetArch::Powerpc => &["qemu-ppc"],
+            TargetArch::S390x => &["qemu-s390x"],
+            TargetArch::Sparc64 => &["qemu-sparc64"],
+            TargetArch::Loongarch64 => &["qemu-loongarch64"],
+            TargetArch::X86 => &["qemu-i386"],
             _ => return false,
         };
-
-        binfmt_dir.join(pattern).exists()
+        names.iter().any(|n| dir.join(n).exists())
     }
     #[cfg(not(target_os = "linux"))]
     {
@@ -87,24 +94,19 @@ pub fn is_binfmt_registered(target: &TargetInfo) -> bool {
     }
 }
 
-fn resolve_sysroot_prefix(target: &TargetInfo, custom_sysroot: Option<&Path>) -> Option<PathBuf> {
-    if let Some(p) = custom_sysroot
-        && p.exists() {
-            return Some(p.to_path_buf());
-        }
-
-    // Standard Debian / Ubuntu / Fedora cross sysroot paths
-    let standard_paths = [
-        format!("/usr/{}", target.triple),
-        format!("/usr/lib/{}", target.triple),
-    ];
-
-    for p_str in standard_paths {
-        let p = Path::new(&p_str);
-        if p.is_dir() {
-            return Some(p.to_path_buf());
-        }
+/// The target's root for QEMU's `-L`: the configured one, else where distributions' cross
+/// toolchains put it (`/usr/aarch64-linux-gnu`; Arch adds `/libc`).
+fn resolve_sysroot_prefix(target: &TargetInfo, custom: Option<&Path>) -> Option<PathBuf> {
+    if let Some(p) = custom
+        && p.exists()
+    {
+        return Some(p.to_path_buf());
     }
-
-    None
+    let mut candidates = Vec::new();
+    if let Some(prefix) = target.tool_prefix() {
+        candidates.push(PathBuf::from(format!("/usr/{prefix}/libc")));
+        candidates.push(PathBuf::from(format!("/usr/{prefix}")));
+    }
+    candidates.push(PathBuf::from(format!("/usr/{}", target.triple)));
+    candidates.into_iter().find(|p| p.join("lib").is_dir())
 }

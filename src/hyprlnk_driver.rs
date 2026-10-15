@@ -1,43 +1,56 @@
-use std::ffi::OsString;
-use std::path::PathBuf;
+//! hyprlnk, the linker built into hyprcross. Rune links with its own copy and needs nothing from
+//! here; Cargo gets this executable as the target's linker, under the name `hyprlnk`.
+//!
+//! The executable links instead of running the CLI when it is started
+//! - as `hyprlnk` (the name hyprcross gives it for Cargo, and in containers),
+//! - as `ld` by the C compiler hyprlnk runs for a `cc` command line (`HYPRLNK_DRIVER` is set),
+//! - with `HYPRCROSS_HYPRLNK` set, or as `hyprcross __hyprlnk <args>`.
 
-/// Check if hyprlnk is available (either built into this binary or present in PATH)
-pub fn is_available() -> bool {
-    #[cfg(feature = "builtin-hyprlnk")]
-    {
-        true
-    }
-    #[cfg(not(feature = "builtin-hyprlnk"))]
-    {
-        find_external_hyprlnk().is_some()
-    }
-}
+use std::ffi::{OsStr, OsString};
+use std::path::{Path, PathBuf};
 
-/// Find external hyprlnk executable in PATH
-pub fn find_external_hyprlnk() -> Option<PathBuf> {
-    let path_var = std::env::var_os("PATH")?;
-    for dir in std::env::split_paths(&path_var) {
-        let candidate = dir.join("hyprlnk");
-        if candidate.is_file() {
-            return Some(candidate);
-        }
-        #[cfg(windows)]
-        {
-            let exe = dir.join("hyprlnk.exe");
-            if exe.is_file() {
-                return Some(exe);
-            }
-        }
+/// Makes the hyprcross executable act as the linker.
+pub const LINKER_ENV: &str = "HYPRCROSS_HYPRLNK";
+
+/// Set by hyprlnk for the C compiler it runs, which then runs hyprlnk again as `ld`.
+const DRIVER_ENV: &str = "HYPRLNK_DRIVER";
+
+/// The C compiler hyprlnk links through on Linux (it knows where the C runtime is).
+pub const CC_ENV: &str = "HYPRLNK_CC";
+
+/// If this process was started as the linker: link, and return the exit code.
+pub fn linker_invocation(args: &[OsString]) -> Option<i32> {
+    if args.get(1).map(OsString::as_os_str) == Some(OsStr::new("__hyprlnk")) {
+        let rest = std::iter::once(OsString::from("hyprlnk")).chain(args[2..].iter().cloned());
+        return Some(run_linker(rest));
+    }
+    let name = args
+        .first()
+        .and_then(|a| Path::new(a).file_name())
+        .and_then(OsStr::to_str)
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    let name = name.strip_suffix(".exe").unwrap_or(&name);
+    let as_ld = std::env::var_os(DRIVER_ENV).is_some() && (name == "ld" || name.starts_with("ld."));
+    if name == "hyprlnk" || as_ld || std::env::var_os(LINKER_ENV).is_some() {
+        return Some(run_linker(args.iter().cloned()));
     }
     None
 }
 
-/// Return path to current hyprcross binary
+pub fn is_available() -> bool {
+    cfg!(feature = "builtin-hyprlnk") || find_external_hyprlnk().is_some()
+}
+
+/// A standalone `hyprlnk` on PATH.
+pub fn find_external_hyprlnk() -> Option<PathBuf> {
+    crate::builder::find_executable("hyprlnk")
+}
+
 pub fn current_exe() -> Option<PathBuf> {
     std::env::current_exe().ok()
 }
 
-/// Check if a target triple is supported by hyprlnk
 pub fn supports_target(triple: &str) -> bool {
     #[cfg(feature = "builtin-hyprlnk")]
     {
@@ -45,15 +58,11 @@ pub fn supports_target(triple: &str) -> bool {
     }
     #[cfg(not(feature = "builtin-hyprlnk"))]
     {
-        // General support matrix for hyprlnk
-        let is_linux = triple.contains("-linux-");
-        let is_apple = triple.contains("-apple-darwin");
-        let is_windows_msvc = triple.contains("-windows-msvc");
-        is_linux || is_apple || is_windows_msvc
+        crate::targets::TargetInfo::parse(triple).hyprlnk_supported
     }
 }
 
-/// Get the rustc linker flavor string if required (e.g. for Apple targets)
+/// The `-C linker-flavor` rustc needs for hyprlnk on this target, if not its default.
 pub fn rustc_linker_flavor(triple: &str) -> Option<&'static str> {
     #[cfg(feature = "builtin-hyprlnk")]
     {
@@ -61,15 +70,11 @@ pub fn rustc_linker_flavor(triple: &str) -> Option<&'static str> {
     }
     #[cfg(not(feature = "builtin-hyprlnk"))]
     {
-        if triple.contains("-apple-") {
-            Some("ld64.lld")
-        } else {
-            None
-        }
+        triple.contains("-apple-").then_some("ld64.lld")
     }
 }
 
-/// Run hyprlnk with the provided arguments and return exit code
+/// Link with the full command line (`argv[0]` first) and return the exit code.
 pub fn run_linker<I, T>(args: I) -> i32
 where
     I: IntoIterator<Item = T>,
@@ -81,47 +86,104 @@ where
     }
     #[cfg(not(feature = "builtin-hyprlnk"))]
     {
-        if let Some(exe) = find_external_hyprlnk() {
-            let status = std::process::Command::new(exe)
-                .args(args)
-                .status();
-            match status {
-                Ok(s) => s.code().unwrap_or(1),
-                Err(e) => {
-                    eprintln!("Failed to execute external hyprlnk: {e}");
-                    1
-                }
+        let mut args = args.into_iter().map(Into::into);
+        let _argv0 = args.next();
+        let Some(exe) = find_external_hyprlnk() else {
+            eprintln!("hyprcross: this build has no built-in hyprlnk, and none is on PATH");
+            return 1;
+        };
+        match std::process::Command::new(exe).args(args).status() {
+            Ok(s) => s.code().unwrap_or(1),
+            Err(e) => {
+                eprintln!("hyprcross: cannot run hyprlnk: {e}");
+                1
             }
-        } else {
-            eprintln!("hyprlnk was requested but neither built-in hyprlnk nor external binary was found");
-            1
         }
     }
 }
 
-/// Formulate rustflags to inject hyprlnk into rustc invocations
-pub fn get_rustflags(triple: &str, self_as_linker: bool) -> Vec<String> {
-    let mut flags = Vec::new();
+/// What Cargo should run as the target's linker: a standalone hyprlnk, or this executable under
+/// the name `hyprlnk` (a link in the cache directory, whose path stays the same across
+/// hyprcross updates, so Cargo's fingerprints do too). `None` where links can't be made.
+pub fn linker_for_cargo() -> Option<PathBuf> {
+    if let Some(external) = find_external_hyprlnk() {
+        return Some(external);
+    }
+    #[cfg(unix)]
+    {
+        link_named_hyprlnk(&crate::config::cache_dir()?.join("bin"), &current_exe()?)
+    }
+    #[cfg(not(unix))]
+    {
+        None
+    }
+}
 
-    if self_as_linker {
-        if let Some(exe) = current_exe() {
-            let exe_str = exe.to_string_lossy().to_string();
-            flags.push(format!("-C linker={exe_str}"));
-            flags.push("-C link-arg=__hyprlnk".to_string());
-        } else if let Some(ext) = find_external_hyprlnk() {
-            flags.push(format!("-C linker={}", ext.to_string_lossy()));
-        } else {
-            flags.push("-C linker=hyprlnk".to_string());
+#[cfg(unix)]
+fn link_named_hyprlnk(dir: &Path, exe: &Path) -> Option<PathBuf> {
+    let link = dir.join("hyprlnk");
+    if std::fs::read_link(&link).ok().as_deref() == Some(exe) {
+        return Some(link);
+    }
+    std::fs::create_dir_all(dir).ok()?;
+    // Replace atomically: another build may be linking through it right now.
+    let tmp = dir.join(format!(".hyprlnk.{}", std::process::id()));
+    let _ = std::fs::remove_file(&tmp);
+    std::os::unix::fs::symlink(exe, &tmp).ok()?;
+    std::fs::rename(&tmp, &link).ok()?;
+    Some(link)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_cli_is_not_mistaken_for_the_linker() {
+        assert_eq!(
+            linker_invocation(&["hyprcross".into(), "build".into()]),
+            None
+        );
+        assert_eq!(
+            linker_invocation(&["/usr/bin/cargo-hyprcross".into(), "hyprcross".into()]),
+            None
+        );
+        // `ld` without hyprlnk's driver variable is some other program's business.
+        if std::env::var_os(DRIVER_ENV).is_none() {
+            assert_eq!(linker_invocation(&["/tmp/x/ld".into(), "-o".into()]), None);
         }
-    } else if let Some(ext) = find_external_hyprlnk() {
-        flags.push(format!("-C linker={}", ext.to_string_lossy()));
-    } else {
-        flags.push("-C linker=hyprlnk".to_string());
     }
 
-    if let Some(flavor) = rustc_linker_flavor(triple) {
-        flags.push(format!("-C linker-flavor={flavor}"));
+    #[test]
+    fn apple_targets_need_the_ld64_flavor() {
+        assert_eq!(
+            rustc_linker_flavor("aarch64-apple-darwin"),
+            Some("ld64.lld")
+        );
+        assert_eq!(rustc_linker_flavor("aarch64-unknown-linux-gnu"), None);
     }
 
-    flags
+    #[cfg(unix)]
+    #[test]
+    fn cargo_gets_a_stable_link_named_hyprlnk() {
+        let dir = tempfile::tempdir().unwrap();
+        let exe = current_exe().unwrap();
+        let link = link_named_hyprlnk(dir.path(), &exe).unwrap();
+        assert_eq!(link, dir.path().join("hyprlnk"));
+        assert_eq!(std::fs::read_link(&link).unwrap(), exe);
+        assert_eq!(
+            link_named_hyprlnk(dir.path(), &exe).unwrap(),
+            link,
+            "reused"
+        );
+
+        let other = dir.path().join("hyprcross-2");
+        std::fs::write(&other, b"").unwrap();
+        link_named_hyprlnk(dir.path(), &other).unwrap();
+        assert_eq!(
+            std::fs::read_link(&link).unwrap(),
+            other,
+            "follows a new executable"
+        );
+    }
 }
