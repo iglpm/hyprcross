@@ -7,6 +7,7 @@ pub mod builder;
 pub mod cli;
 pub mod config;
 pub mod container;
+pub mod crash;
 pub mod daemon;
 pub mod direct;
 pub mod doctor;
@@ -39,6 +40,7 @@ pub fn version() -> &'static str {
 
 /// Run `hyprcross` (or `cargo hyprcross`) with this process' arguments; the exit code.
 pub fn run() -> Result<i32> {
+    crash::init();
     let mut args: Vec<OsString> = std::env::args_os().collect();
 
     if let Some(code) = hyprlnk_driver::linker_invocation(&args) {

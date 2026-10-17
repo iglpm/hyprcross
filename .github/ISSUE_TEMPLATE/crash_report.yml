@@ -1,0 +1,50 @@
+name: Crash Report
+description: Report an unexpected internal panic or crash dump in hyprcross
+labels: ["crash", "bug", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report this! An internal panic occurred in hyprcross.
+        Please paste the contents of your generated `hyprcross-crash-*.log` file below.
+
+  - type: input
+    id: version
+    attributes:
+      label: Hyprcross Version
+      description: The version from the crash report (e.g. `2027.0.0-rc.1`)
+    validations:
+      required: true
+
+  - type: input
+    id: platform
+    attributes:
+      label: Platform / Architecture
+      description: OS and CPU architecture (e.g. `Linux x86_64`, `macOS aarch64`, `Windows x86_64`)
+    validations:
+      required: true
+
+  - type: input
+    id: command
+    attributes:
+      label: Command Executed
+      description: The command you ran (e.g. `hyprcross build -t aarch64-unknown-linux-gnu`)
+    validations:
+      required: true
+
+  - type: textarea
+    id: crash_dump
+    attributes:
+      label: Crash Dump Log
+      description: Full contents of the `hyprcross-crash-*.log` file
+      render: text
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional Context
+      description: Any other context about your project or what you were doing when the crash occurred
+    validations:
+      required: false

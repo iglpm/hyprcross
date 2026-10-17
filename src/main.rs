@@ -1,4 +1,5 @@
 fn main() {
+    hyprcross::crash::init();
     let code = match hyprcross::run() {
         Ok(code) => code,
         Err(err) => {
