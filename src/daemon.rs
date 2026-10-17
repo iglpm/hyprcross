@@ -410,14 +410,21 @@ impl<'a> ContainerDaemon<'a> {
             if !out.status.success() {
                 activity.clear();
                 let msg = String::from_utf8_lossy(&out.stderr);
-                bail!(
-                    "cannot start a container from {image}: {}",
-                    msg.lines()
-                        .rev()
-                        .find(|l| !l.trim().is_empty())
-                        .unwrap_or("unknown error")
-                        .trim()
-                );
+                let detail = msg
+                    .lines()
+                    .map(|l| l.trim())
+                    .filter(|l| {
+                        !l.is_empty()
+                            && !l.starts_with("Run 'docker")
+                            && !l.starts_with("See 'docker")
+                            && !l.starts_with("Run 'podman")
+                            && !l.starts_with("See 'podman")
+                    })
+                    .next_back()
+                    .or_else(|| msg.lines().rev().find(|l| !l.trim().is_empty()))
+                    .unwrap_or("unknown error")
+                    .trim();
+                bail!("cannot start a container from {image}: {detail}");
             }
             if mode == Mode::Agent && !self.wait_for_agent(run_dir) {
                 activity.clear();
@@ -477,10 +484,13 @@ impl<'a> ContainerDaemon<'a> {
     }
 
     fn remove(&self) {
-        let _ = self
-            .engine
-            .command()
-            .args(["rm", "-f", "-t", "0", &self.container_name()])
+        let mut cmd = self.engine.command();
+        cmd.arg("rm").arg("-f");
+        if self.engine.is_podman() {
+            cmd.args(["-t", "0"]);
+        }
+        let _ = cmd
+            .arg(&self.container_name())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .status();
@@ -581,9 +591,12 @@ pub fn remove_all(engine: &ContainerEngine, names: &[String]) -> usize {
     if names.is_empty() {
         return 0;
     }
-    let ok = engine
-        .command()
-        .args(["rm", "-f", "-t", "0"])
+    let mut cmd = engine.command();
+    cmd.arg("rm").arg("-f");
+    if engine.is_podman() {
+        cmd.args(["-t", "0"]);
+    }
+    let ok = cmd
         .args(names)
         .stdout(Stdio::null())
         .stderr(Stdio::null())
