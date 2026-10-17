@@ -16,7 +16,7 @@ with a runner for `test` and `run`. The full list, with toolchain versions:
 | Linux, musl 1.2.5 | x86-64, x86, AArch64, ARMv7, ARMv6, RISC-V 64, POWER LE | QEMU (x86-64 natively) |
 | Windows, MinGW-w64 | `x86_64-pc-windows-gnu`, `i686-pc-windows-gnu` | Wine |
 | Android, NDK r27c | AArch64, ARMv7, x86-64, x86 | build only |
-| FreeBSD 14.3 | `x86_64-unknown-freebsd` | build only |
+| FreeBSD 14.4 | `x86_64-unknown-freebsd` | build only |
 | WASI | `wasm32-wasip1`, `wasm32-wasip2` | Wasmtime |
 | Bare-metal Arm | `thumbv6m-none-eabi`, `thumbv7em-none-eabihf` | build only |
 

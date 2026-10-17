@@ -11,13 +11,14 @@ machine="$2"
 
 # Binaries built against this run on it and every later release. Once a release is out of
 # support it moves to the archive, which is where the second URL points.
-FREEBSD_VERSION=14.3
+FREEBSD_VERSION=14.4
 
 apt_install clang lld llvm
 
 release="${FREEBSD_VERSION}-RELEASE"
 fetch_any /tmp/base.txz \
     "https://download.freebsd.org/releases/${machine}/${release}/base.txz" \
+    "https://ftpmirror.your.org/pub/FreeBSD-Archive/old-releases/${machine}/${release}/base.txz" \
     "https://archive.freebsd.org/old-releases/${machine}/${release}/base.txz"
 
 mkdir -p /opt/freebsd-sysroot

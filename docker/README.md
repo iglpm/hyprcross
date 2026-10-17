@@ -47,7 +47,7 @@ and shares the same caches.
 | `i686-linux-android` | Android x86 (NDK r27c, API 21+) | — |
 | `x86_64-linux-android` | Android x86-64 (NDK r27c, API 21+) | — |
 | **FreeBSD** | | |
-| `x86_64-unknown-freebsd` | FreeBSD x86-64 (14.3 sysroot, clang) | — |
+| `x86_64-unknown-freebsd` | FreeBSD x86-64 (14.4 sysroot, clang) | — |
 | **WebAssembly** | | |
 | `wasm32-wasip1` | WebAssembly WASI preview 1 (wasi-sdk, Wasmtime to run tests) | Wasmtime |
 | `wasm32-wasip2` | WebAssembly WASI preview 2 (wasi-sdk, Wasmtime to run tests) | Wasmtime |

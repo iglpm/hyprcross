@@ -27,8 +27,8 @@ fetch_any() {
     shift
     local url
     for url in "$@"; do
-        if curl --fail --location --silent --show-error --connect-timeout 30 \
-            --retry 5 --retry-delay 5 --retry-connrefused \
+        if curl --fail --location --silent --show-error --connect-timeout 15 \
+            --retry 3 --retry-delay 3 --retry-connrefused \
             --output "$dest" "$url"; then
             return 0
         fi

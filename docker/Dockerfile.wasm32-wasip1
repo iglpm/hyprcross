@@ -19,7 +19,8 @@ ENV CARGO_TARGET_WASM32_WASIP1_RUNNER="hyprcross-runner wasmtime" \
     CC_wasm32_wasip1="/opt/wasi-sdk/bin/wasm32-wasip1-clang" \
     CXX_wasm32_wasip1="/opt/wasi-sdk/bin/wasm32-wasip1-clang++" \
     AR_wasm32_wasip1="/opt/wasi-sdk/bin/llvm-ar" \
-    BINDGEN_EXTRA_CLANG_ARGS_wasm32_wasip1="--sysroot=/opt/wasi-sdk/share/wasi-sysroot"
+    BINDGEN_EXTRA_CLANG_ARGS_wasm32_wasip1="--sysroot=/opt/wasi-sdk/share/wasi-sysroot" \
+    XDG_CACHE_HOME="/tmp/cache"
 
 LABEL org.opencontainers.image.title="hyprcross wasm32-wasip1" \
       org.opencontainers.image.description="WebAssembly WASI preview 1 (wasi-sdk, Wasmtime to run tests), for hyprcross" \

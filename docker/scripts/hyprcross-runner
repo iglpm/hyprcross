@@ -50,6 +50,8 @@ case "$how" in
         exec wine "$@"
         ;;
     wasmtime)
+        export XDG_CACHE_HOME="${XDG_CACHE_HOME:-/tmp/cache-$(id -u)}"
+        mkdir -p "$XDG_CACHE_HOME" 2>/dev/null || true
         exec wasmtime run --dir=. "$@"
         ;;
     *)
