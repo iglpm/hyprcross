@@ -76,7 +76,7 @@ jobs:
 
           echo "Cloning repository wiki..."
           if ! git clone "$WIKI_URL" wiki_clone; then
-            echo "Could not clone wiki repository. It might be uninitialized. Skipping."
+            echo "::warning title=GitHub Wiki Not Initialized::GitHub has not created the underlying .wiki.git repository yet. Please visit https://github.com/${{ github.repository }}/wiki, click 'Create the first page' (title: Home) and save it. Once initialized, this workflow will automatically synchronize all documentation."
             exit 0
           fi
 
