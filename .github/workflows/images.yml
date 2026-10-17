@@ -41,16 +41,23 @@ env:
 jobs:
   plan:
     name: Plan
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, docker-builds]
     outputs:
       matrix: ${{ steps.matrix.outputs.matrix }}
       prefix: ${{ steps.prefix.outputs.prefix }}
       push: ${{ steps.push.outputs.push }}
       refresh: ${{ steps.refresh.outputs.week }}
     steps:
-      - uses: actions/checkout@v7
+      - name: Configure Git Credentials for Submodules
+        env:
+          TOKEN: ${{ secrets.RUNIFIED_TOKEN || secrets.HYPRLNK_TOKEN || github.token }}
+        run: |
+          git config --global url."https://x-access-token:${TOKEN}@github.com/".insteadOf "https://github.com/"
+
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          token: ${{ secrets.RUNIFIED_TOKEN || secrets.HYPRLNK_TOKEN || github.token }}
 
       - id: prefix
         name: Image prefix
@@ -64,7 +71,7 @@ jobs:
 
       - id: refresh
         name: Package refresh key
-        run: echo "week=$(date -u +%G-W%V)" >> "$GITHUB_OUTPUT"
+        run: echo "week=$(date -u +\%G-W\%V)" >> "$GITHUB_OUTPUT"
 
       - id: matrix
         name: Targets
@@ -88,12 +95,12 @@ jobs:
                 hyprlnk) if [ "$EVENT" = pull_request ]; then all=true; fi ;;
                 docker/Dockerfile.*)
                   # A deleted Dockerfile has nothing to build.
-                  if [ -f "$f" ]; then targets="$targets ${f#docker/Dockerfile.}"; fi ;;
+                  if [ -f "$f" ]; then targets="$targets${f#docker/Dockerfile.}"; fi ;;
                 docker/README.md | docker/update-pins.sh) ;;
                 docker/*)
                   users="$(grep -lF "${f#docker/}" docker/Dockerfile.* || true)"
                   if [ -z "$users" ]; then all=true; fi
-                  for u in $users; do targets="$targets ${u#docker/Dockerfile.}"; done ;;
+                  for u in $users; do targets="$targets${u#docker/Dockerfile.}"; done ;;
                 *) all=true ;;
               esac
             done
@@ -103,7 +110,7 @@ jobs:
               echo "matrix=[]" >> "$GITHUB_OUTPUT"
               exit 0
             else
-              targets="$(printf '%s\n' $targets | sort -u | tr '\n' ' ')"
+              targets="$(printf '\%s\n'$targets | sort -u | tr '\n' ' ')"
             fi
           fi
           read -ra list <<< "$targets"
@@ -111,14 +118,21 @@ jobs:
 
   hyprcross:
     name: Build hyprcross
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, docker-builds]
     steps:
+      - name: Configure Git Credentials for Submodules
+        env:
+          TOKEN: ${{ secrets.RUNIFIED_TOKEN || secrets.HYPRLNK_TOKEN || github.token }}
+        run: |
+          git config --global url."https://x-access-token:${TOKEN}@github.com/".insteadOf "https://github.com/"
+
       # hyprlnk, which hyprcross links with, is a submodule. While it is private the workflow's
       # own token can't read it: HYPRLNK_TOKEN, with read access to both repositories, can.
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v4
         with:
           submodules: recursive
-          token: ${{ secrets.HYPRLNK_TOKEN || github.token }}
+          token: ${{ secrets.RUNIFIED_TOKEN || secrets.HYPRLNK_TOKEN || github.token }}
+
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Build
@@ -133,7 +147,7 @@ jobs:
     name: ${{ matrix.target }}
     needs: [plan, hyprcross]
     if: needs.plan.outputs.matrix != '[]'
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, docker-builds]
     timeout-minutes: 120
     strategy:
       fail-fast: false
@@ -143,7 +157,15 @@ jobs:
       IMAGE: ${{ needs.plan.outputs.prefix }}/${{ matrix.target }}
       SMOKE_IMAGE: hyprcross-smoke/${{ matrix.target }}:ci
     steps:
-      - uses: actions/checkout@v7
+      - name: Configure Git Credentials for Submodules
+        env:
+          TOKEN: ${{ secrets.RUNIFIED_TOKEN || secrets.HYPRLNK_TOKEN || github.token }}
+        run: |
+          git config --global url."https://x-access-token:${TOKEN}@github.com/".insteadOf "https://github.com/"
+
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.RUNIFIED_TOKEN || secrets.HYPRLNK_TOKEN || github.token }}
 
       - name: Make room
         # Android's NDK and the from-source musl toolchains need more disk than runners have free.
@@ -206,21 +228,4 @@ jobs:
           HYPRCROSS_IMAGE_REPOSITORY: hyprcross-smoke
           HYPRCROSS_IMAGE_TAG: ci
         run: |
-          hyprcross="${{ runner.temp }}/hyprcross/hyprcross"
-          chmod +x "$hyprcross"
-          "$hyprcross" ${{ matrix.smoke }} -v -t ${{ matrix.target }} --engine container --builder cargo
-          "$hyprcross" daemon stop --all
-
-      - name: Push
-        if: needs.plan.outputs.push == 'true'
-        uses: docker/build-push-action@v6
-        with:
-          context: docker
-          file: docker/Dockerfile.${{ matrix.target }}
-          platforms: ${{ matrix.platforms }}
-          push: true
-          provenance: false
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          build-args: HYPRCROSS_REFRESH=${{ needs.plan.outputs.refresh }}
-          cache-from: type=registry,ref=${{ env.IMAGE }}:buildcache
+          hyprcross="${{ runner.temp }}/hyprcross/hy
