@@ -5,7 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2027.0.0-rc.1] - 2026-10-18
+
+### Added
+- **Native macOS Cross-Compilation**: Zero-Docker cross-compilation pipeline on Linux and
+  Windows hosts for `aarch64-apple-darwin` and `x86_64-apple-darwin`. Automatically fetches,
+  verifies, and caches minimal macOS SDK stubs (`MacOSX26.1.sdk` from `joseluisq/macosx-sdks`)
+  into `~/.local/share/hyprcross/sdks/MacOSX.sdk` (Linux) or `%LOCALAPPDATA%\hyprcross\sdks\MacOSX.sdk`
+  (Windows), overridable with `HYPRCROSS_MACOS_SDK_PATH` or `SDKROOT`. Links Mach-O binaries
+  directly via `hyprlnk` with `-C linker-flavor=ld64.lld` and `-isysroot`.
+- **Searchable `targets` Command**: `hyprcross targets [query]` supports searching by natural
+  keywords (e.g. `hyprcross targets "windows arm"`, `hyprcross targets macos`, `hyprcross targets musl`).
+  Lists all supported targets, standard library installation status, build engine, and test runners.
+- **Crates.io Publishing & `cargo-hyprcross` Crate**: Added standalone `cargo-hyprcross` crate
+  in `crates/cargo-hyprcross` to support `cargo install cargo-hyprcross` directly from crates.io.
+- **Pre-Release Workflow**: Release workflow automatically differentiates `-rc.x` pre-releases
+  from stable releases, tagging GitHub Releases as beta / pre-release and publishing to crates.io.
+
+### Changed
+- **Cleaner Image Pull UI**: Replaced raw, noisy container engine logs during `podman pull` and
+  `docker pull` with custom hyprcross progress bars and layer download phase indicators.
+- **Smarter Auto Engine**: `engine = "auto"` automatically chooses direct host execution for
+  host targets, macOS targets, targets without C dependencies (Wasm, bare metal), and targets
+  with local cross-compilers installed, using container images only when needed.
+
 ## [0.2.0] - 2026-10-15
+
 
 ### Added
 - **Images of its own**, one per target, in `docker/`: Linux on glibc 2.39 for 12

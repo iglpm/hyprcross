@@ -156,3 +156,35 @@ fn every_image_target_has_a_dockerfile_and_back() {
         );
     }
 }
+
+#[test]
+fn test_macos_targets_auto_engine_is_direct() {
+    let config = hyprcross::config::Config::default();
+    for target in ["aarch64-apple-darwin", "x86_64-apple-darwin"] {
+        let info = TargetInfo::parse(target);
+        assert_eq!(
+            hyprcross::engine::auto_engine(&info, &config),
+            hyprcross::engine::Engine::Direct,
+            "{target} should build direct without containers"
+        );
+    }
+}
+
+#[test]
+fn test_targets_search_matching() {
+    let arm_win = TargetInfo::parse("aarch64-pc-windows-msvc");
+    assert!(arm_win.matches_query(&["windows".to_string(), "arm".to_string()]));
+    assert!(arm_win.matches_query(&["windows arm".to_string()]));
+    assert!(arm_win.matches_query(&["msvc".to_string()]));
+
+    let mac = TargetInfo::parse("aarch64-apple-darwin");
+    assert!(mac.matches_query(&["macos".to_string()]));
+    assert!(mac.matches_query(&["apple".to_string()]));
+    assert!(mac.matches_query(&["darwin".to_string()]));
+    assert!(!mac.matches_query(&["windows".to_string()]));
+
+    let musl = TargetInfo::parse("x86_64-unknown-linux-musl");
+    assert!(musl.matches_query(&["musl".to_string()]));
+    assert!(musl.matches_query(&["linux x64".to_string()]));
+}
+

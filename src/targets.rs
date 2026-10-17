@@ -38,8 +38,52 @@ pub const IMAGE_TARGETS: &[&str] = &[
     "thumbv7em-none-eabihf",
 ];
 
+/// All first-class targets supported by hyprcross (both via container images and direct host execution).
+pub const ALL_TARGETS: &[&str] = &[
+    "x86_64-unknown-linux-gnu",
+    "i686-unknown-linux-gnu",
+    "aarch64-unknown-linux-gnu",
+    "armv7-unknown-linux-gnueabihf",
+    "arm-unknown-linux-gnueabi",
+    "riscv64gc-unknown-linux-gnu",
+    "powerpc64le-unknown-linux-gnu",
+    "powerpc64-unknown-linux-gnu",
+    "powerpc-unknown-linux-gnu",
+    "s390x-unknown-linux-gnu",
+    "sparc64-unknown-linux-gnu",
+    "loongarch64-unknown-linux-gnu",
+    "x86_64-unknown-linux-musl",
+    "i686-unknown-linux-musl",
+    "aarch64-unknown-linux-musl",
+    "armv7-unknown-linux-musleabihf",
+    "arm-unknown-linux-musleabihf",
+    "riscv64gc-unknown-linux-musl",
+    "powerpc64le-unknown-linux-musl",
+    "x86_64-apple-darwin",
+    "aarch64-apple-darwin",
+    "x86_64-pc-windows-msvc",
+    "aarch64-pc-windows-msvc",
+    "i686-pc-windows-msvc",
+    "x86_64-pc-windows-gnu",
+    "i686-pc-windows-gnu",
+    "aarch64-pc-windows-gnullvm",
+    "x86_64-pc-windows-gnullvm",
+    "aarch64-linux-android",
+    "armv7-linux-androideabi",
+    "x86_64-linux-android",
+    "i686-linux-android",
+    "x86_64-unknown-freebsd",
+    "wasm32-wasip1",
+    "wasm32-wasip2",
+    "wasm32-unknown-unknown",
+    "thumbv6m-none-eabi",
+    "thumbv7em-none-eabihf",
+    "riscv32imc-unknown-none-elf",
+];
+
 pub const DEFAULT_IMAGE_REPOSITORY: &str = "ghcr.io/runepm/hyprcross";
 pub const DEFAULT_IMAGE_TAG: &str = "latest";
+
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TargetArch {
@@ -372,10 +416,67 @@ impl TargetInfo {
         host.split('-').next() == self.triple.split('-').next()
     }
 
+    pub fn matches_query(&self, query: &[String]) -> bool {
+        if query.is_empty() {
+            return true;
+        }
+        let terms: Vec<String> = query
+            .iter()
+            .flat_map(|q| q.split_whitespace())
+            .map(|t| t.to_ascii_lowercase())
+            .collect();
+        if terms.is_empty() {
+            return true;
+        }
+        terms.iter().all(|term| self.matches_term(term))
+    }
+
+
+    fn matches_term(&self, term: &str) -> bool {
+        let triple = self.triple.to_ascii_lowercase();
+        if triple.contains(term) {
+            return true;
+        }
+
+        // Match OS aliases
+        match (&self.os, term) {
+            (TargetOs::Windows, "win" | "windows") => return true,
+            (TargetOs::Linux, "linux") => return true,
+            (TargetOs::MacOS, "mac" | "macos" | "darwin" | "apple" | "osx") => return true,
+            (TargetOs::Android, "android") => return true,
+            (TargetOs::FreeBsd, "bsd" | "freebsd") => return true,
+            (TargetOs::Wasi, "wasi") => return true,
+            (TargetOs::None, "none" | "embedded" | "baremetal" | "bare-metal") => return true,
+            _ => {}
+        }
+
+        // Match Arch aliases
+        match (&self.arch, term) {
+            (TargetArch::Aarch64, "arm" | "arm64" | "aarch64") => return true,
+            (TargetArch::Armv7 | TargetArch::Arm, "arm" | "arm32" | "armv7") => return true,
+            (TargetArch::X86_64, "x86_64" | "x64" | "amd64" | "intel") => return true,
+            (TargetArch::X86, "x86" | "i686" | "32bit" | "32-bit") => return true,
+            (TargetArch::Riscv64, "riscv" | "riscv64") => return true,
+            (TargetArch::Wasm32, "wasm" | "wasm32" | "webassembly") => return true,
+            _ => {}
+        }
+
+        // Match Env aliases
+        match (&self.env, term) {
+            (TargetEnv::Gnu, "gnu" | "glibc") => return true,
+            (TargetEnv::Musl, "musl" | "static") => return true,
+            (TargetEnv::Msvc, "msvc" | "cl") => return true,
+            _ => {}
+        }
+
+        false
+    }
+
     pub fn display_name(&self) -> &str {
         &self.triple
     }
 }
+
 
 impl fmt::Display for TargetInfo {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

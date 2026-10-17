@@ -101,7 +101,8 @@ pub enum Commands {
     Clean(CleanArgs),
 
     /// List the targets with images, and how each builds here
-    Targets,
+    Targets(TargetsArgs),
+
 
     /// Check what cross-compiling needs on this machine
     Doctor,
@@ -225,8 +226,16 @@ pub enum ImagesAction {
 }
 
 #[derive(Args, Debug, Clone, Default)]
+pub struct TargetsArgs {
+    /// Optional search query to filter targets (e.g. "windows arm", "linux aarch64", "musl")
+    #[arg(trailing_var_arg = true, value_name = "QUERY")]
+    pub query: Vec<String>,
+}
+
+#[derive(Args, Debug, Clone, Default)]
 pub struct InitArgs {
     /// The default target to write
     #[arg(short, long, value_name = "TRIPLE")]
     pub target: Option<String>,
 }
+

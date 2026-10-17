@@ -85,6 +85,14 @@ impl<'a> DirectEngine<'a> {
             cmd.env(&linker_var, cc);
         }
 
+        let macos_sdk = if self.target.os == crate::targets::TargetOs::MacOS {
+            let sdk = crate::macos::ensure_macos_sdk()?;
+            cmd.env("SDKROOT", &sdk);
+            Some(sdk)
+        } else {
+            None
+        };
+
         if hyprlnk && self.builder.kind == BuilderKind::Cargo {
             match hyprlnk_driver::linker_for_cargo() {
                 Some(linker) => {
@@ -100,14 +108,22 @@ impl<'a> DirectEngine<'a> {
             if let Some(cc) = driver.filter(|c| c != "cc") {
                 cmd.env(hyprlnk_driver::CC_ENV, cc);
             }
+            let mut rustc_flags = Vec::new();
             if let Some(flavor) = hyprlnk_driver::rustc_linker_flavor(triple) {
-                let flag = format!("-C linker-flavor={flavor}");
+                rustc_flags.push(format!("-C linker-flavor={flavor}"));
+            }
+            if let Some(sdk) = &macos_sdk {
+                rustc_flags.push(format!("-C link-arg=-isysroot -C link-arg={}", sdk.display()));
+            }
+            if !rustc_flags.is_empty() {
+                let flag = rustc_flags.join(" ");
                 match std::env::var("RUSTFLAGS") {
                     Ok(existing) => cmd.env("RUSTFLAGS", format!("{existing} {flag}")),
                     Err(_) => cmd.env(format!("CARGO_TARGET_{key}_RUSTFLAGS"), flag),
                 };
             }
         }
+
 
         if matches!(subcommand, "test" | "run" | "bench") {
             let runner_var = format!("CARGO_TARGET_{key}_RUNNER");

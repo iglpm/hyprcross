@@ -14,6 +14,7 @@ pub mod engine;
 pub mod help;
 pub mod host;
 pub mod hyprlnk_driver;
+pub mod macos;
 pub mod qemu;
 pub mod targets;
 pub mod ui;
@@ -28,7 +29,8 @@ use crate::cli::{Commands, CommonArgs, DaemonAction, ImagesAction, SharedBuildOp
 use crate::config::Config;
 use crate::container::ContainerEngine;
 use crate::engine::{ExecutionContext, auto_engine, init_project};
-use crate::targets::{IMAGE_TARGETS, TargetInfo};
+use crate::targets::{ALL_TARGETS, TargetInfo, TargetOs};
+
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -90,8 +92,8 @@ fn dispatch(args: Vec<OsString>) -> Result<i32> {
         Some(Commands::Clippy(a)) => build("clippy", a, &cli.build_opts, config),
         Some(Commands::Doc(a)) => build("doc", a, &cli.build_opts, config),
         Some(Commands::Clean(a)) => clean(a, config),
-        Some(Commands::Targets) => {
-            list_targets(&config);
+        Some(Commands::Targets(a)) => {
+            list_targets(&config, &a.query);
             Ok(0)
         }
         Some(Commands::Doctor) => {
@@ -285,20 +287,40 @@ fn clean(args: cli::CleanArgs, config: Config) -> Result<i32> {
     Ok(cmd.status()?.code().unwrap_or(1))
 }
 
-fn list_targets(config: &Config) {
+fn list_targets(config: &Config, query: &[String]) {
     let cwd = std::env::current_dir().unwrap_or_else(|_| ".".into());
-    let width = IMAGE_TARGETS.iter().map(|t| t.len()).max().unwrap_or(0) + 2;
+    let all: Vec<&str> = ALL_TARGETS
+        .iter()
+        .copied()
+        .filter(|t| {
+            let info = TargetInfo::parse(t);
+            info.matches_query(query)
+        })
+        .collect();
+
+    if all.is_empty() {
+        ui::warn(format!("no targets matched query: {}", query.join(" ")));
+        ui::hint("try broader search terms like 'windows', 'linux', 'arm', 'macos', 'musl'");
+        return;
+    }
+
+    let width = all.iter().map(|t| t.len()).max().unwrap_or(0) + 2;
+    let query_desc = if query.is_empty() {
+        String::new()
+    } else {
+        format!(" matching `{}`", query.join(" "))
+    };
     ui::out(format!(
         "{} {}",
         ui::brand("Targets"),
         ui::dim(format!(
-            "· {} with images at {}",
-            IMAGE_TARGETS.len(),
-            config.build.image_repository
+            "· {} available{}",
+            all.len(),
+            query_desc
         ))
     ));
     let mut missing = 0;
-    for t in IMAGE_TARGETS {
+    for t in &all {
         let info = TargetInfo::parse(t);
         let engine = match config.get_target(t).and_then(|c| c.engine.clone()) {
             Some(e) => e,
@@ -315,7 +337,15 @@ fn list_targets(config: &Config) {
             None => ui::dim("?"),
         };
         let runner = match info.image_runner() {
-            targets::Runner::None => String::new(),
+            targets::Runner::None => {
+                if info.os == TargetOs::MacOS {
+                    "macOS SDK stubs · hyprlnk".to_string()
+                } else if info.env == targets::TargetEnv::Msvc {
+                    "MSVC · hyprlnk".to_string()
+                } else {
+                    String::new()
+                }
+            }
             r => format!("tests: {r}"),
         };
         ui::out(format!(
@@ -334,6 +364,7 @@ fn list_targets(config: &Config) {
         }
     )));
 }
+
 
 fn daemon_command(action: DaemonAction, config: Config) -> Result<i32> {
     let engine = ContainerEngine::detect(&config.build.container_engine)?;

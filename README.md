@@ -25,9 +25,11 @@ $ hyprcross build -t aarch64-unknown-linux-gnu
 
 ## What it does
 
-- **Builds on the host when it can.** The host's own target, targets that need no C toolchain
+- **Builds on the host when it can.** The host's own target, macOS targets (`*-apple-darwin`
+  via zero-Docker minimal SDK bootstrapping and hyprlnk), targets that need no C toolchain
   (bare metal, WebAssembly), and targets whose C cross compiler is installed build directly:
   hyprcross names the compiler as the linker and QEMU, Wine or Wasmtime as the test runner.
+
 - **Builds in a container when it can't.** Each target has an image with its toolchain and an
   emulator for its tests ([30 of them](docker/README.md)). The project, `CARGO_HOME`,
   `RUSTUP_HOME` and `RUNE_HOME` are mounted at their host paths, so the container builds with

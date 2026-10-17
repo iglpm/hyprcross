@@ -1,7 +1,8 @@
 [package]
 name = "hyprcross"
-version = "2027.0.0"
+version = "2027.0.0-rc.1"
 edition = "2024"
+
 license = "MIT OR Apache-2.0"
 rust-version = "1.89"
 authors = ["Jonas <me@byjonas.dev>", "The Rune Project Developers"]
@@ -23,10 +24,6 @@ path = "src/lib.rs"
 name = "hyprcross"
 path = "src/main.rs"
 
-[[bin]]
-name = "cargo-hyprcross"
-path = "src/bin/cargo-hyprcross.rs"
-
 [dependencies]
 clap = { version = "4", features = ["derive", "wrap_help", "env"] }
 serde = { version = "1", features = ["derive"] }
@@ -42,7 +39,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tempfile = "3"
 dunce = "1.0"
 walkdir = "2"
-hyprlnk = { path = "hyprlnk", optional = true }
+hyprlnk = { version = "2027.0.0", path = "hyprlnk", optional = true }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
@@ -53,3 +50,10 @@ builtin-hyprlnk = ["dep:hyprlnk"]
 
 [dev-dependencies]
 tempfile = "3"
+
+[workspace]
+members = [
+    ".",
+    "crates/cargo-hyprcross",
+]
+

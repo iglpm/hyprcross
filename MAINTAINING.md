@@ -156,14 +156,16 @@ edit the docs in the repository, not in the wiki: the next sync overwrites wiki 
 
 ## 7. Releases
 
-1. Set `version` in `Cargo.toml` (and `Cargo.lock`, with `cargo update -p hyprcross`) and move
-   the changelog's entries under the new version.
-2. Tag and push: `git tag v2027.0.0 && git push origin v2027.0.0`.
+1. Set `version` in `Cargo.toml`, `crates/cargo-hyprcross/Cargo.toml` (and `Cargo.lock`,
+   with `cargo check`) and document the changes in `CHANGELOG.md`.
+2. Tag and push: `git tag v2027.0.0-rc.1 && git push origin v2027.0.0-rc.1`.
 
-The Release workflow builds `hyprcross` and `cargo-hyprcross` for Linux (x86-64 glibc and
-musl, aarch64), macOS (arm64, x86-64) and Windows (x64), and attaches them, with SHA-256
-checksums, to the GitHub release for the tag (it creates the release). The Images workflow
-rebuilds every image and tags it `0.2.0` and `0.2` as well.
+The Release workflow cross-compiles `hyprcross` and `cargo-hyprcross` across the full matrix
+(Linux glibc/musl x86-64/aarch64/armv7/riscv64, macOS aarch64/x86-64, Windows MSVC/GNU, FreeBSD)
+using hyprcross itself on self-hosted Linux runners. It automatically detects pre-release tags
+(`-rc.x`, `-beta`, `-alpha`) to publish beta GitHub Releases, packages checksummed archives,
+and publishes both `hyprcross` and `cargo-hyprcross` to crates.io using `CRATESIO_TOKEN`.
+
 
 ## After setup
 

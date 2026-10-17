@@ -117,23 +117,68 @@ impl ContainerEngine {
         )
     }
 
-    /// Pull `image`, with a spinner; the error says why it failed.
+    /// Pull `image`, with a custom progress bar and clean status updates.
     pub fn pull(&self, image: &str) -> Result<()> {
-        let activity = ui::Activity::start("pulling", image);
+        let progress = ui::PullProgress::start(image);
         ui::trace(format!("{} pull {image}", self.kind.name()));
-        let out = self
+
+        let mut child = self
             .command()
             .args(["pull", image])
             .stdin(Stdio::null())
-            .output()
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
             .with_context(|| format!("cannot run {}", self.kind.name()))?;
-        if out.status.success() {
-            activity.finish("pulled", image);
+
+        let stdout = child.stdout.take();
+        let stderr = child.stderr.take();
+
+        let (tx, rx) = std::sync::mpsc::channel();
+        let tx_out = tx.clone();
+        let h_out = std::thread::spawn(move || {
+            if let Some(out) = stdout {
+                let reader = std::io::BufReader::new(out);
+                for line in std::io::BufRead::lines(reader).map_while(Result::ok) {
+                    let _ = tx_out.send(line);
+                }
+            }
+        });
+        let tx_err = tx;
+        let h_err = std::thread::spawn(move || {
+            if let Some(err) = stderr {
+                let reader = std::io::BufReader::new(err);
+                for line in std::io::BufRead::lines(reader).map_while(Result::ok) {
+                    let _ = tx_err.send(line);
+                }
+            }
+        });
+
+
+        let mut error_lines: Vec<String> = Vec::new();
+        while let Ok(line) = rx.recv() {
+            let trimmed = line.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            if let Some(update) = parse_pull_progress(trimmed) {
+                progress.update(update.percent, update.message);
+            }
+            error_lines.push(line);
+        }
+        let _ = h_out.join();
+        let _ = h_err.join();
+
+        let status = child.wait()?;
+        if status.success() {
+            progress.finish();
             return Ok(());
         }
-        activity.clear();
-        bail!("{}", last_error_line(&out.stderr, "the pull failed"))
+        progress.clear();
+        let joined = error_lines.join("\n");
+        bail!("{}", last_error_line(joined.as_bytes(), "the pull failed"))
     }
+
 
     /// Build `tag` from `dockerfile`, with its directory as the context.
     pub fn build_image(&self, dockerfile: &Path, tag: &str, base: Option<&str>) -> Result<()> {
@@ -191,6 +236,111 @@ fn last_error_line(stderr: &[u8], fallback: &str) -> String {
         .map(|l| l.trim().trim_start_matches("Error: ").to_string())
         .unwrap_or_else(|| fallback.to_string())
 }
+
+struct PullUpdate<'a> {
+    percent: Option<u64>,
+    message: &'a str,
+}
+
+fn parse_pull_progress(line: &str) -> Option<PullUpdate<'_>> {
+    let lower = line.to_ascii_lowercase();
+    if lower.contains("copying blob") || lower.contains("copying config") {
+        let percent = parse_transfer_percent(line);
+        return Some(PullUpdate {
+            percent,
+            message: "copying image layers...",
+        });
+    }
+    if lower.contains("downloading") {
+        let percent = parse_transfer_percent(line);
+        return Some(PullUpdate {
+            percent,
+            message: "downloading layers...",
+        });
+    }
+    if lower.contains("extracting") {
+        return Some(PullUpdate {
+            percent: None,
+            message: "extracting layers...",
+        });
+    }
+    if lower.contains("pull complete") || lower.contains("download complete") {
+        return Some(PullUpdate {
+            percent: None,
+            message: "layer complete",
+        });
+    }
+    if lower.contains("verifying checksum") {
+        return Some(PullUpdate {
+            percent: None,
+            message: "verifying layer checksums...",
+        });
+    }
+    if lower.contains("getting image source signatures") {
+        return Some(PullUpdate {
+            percent: Some(10),
+            message: "resolving signatures...",
+        });
+    }
+    if lower.contains("writing manifest") {
+        return Some(PullUpdate {
+            percent: Some(95),
+            message: "writing manifest...",
+        });
+    }
+    if lower.contains("storing signatures") {
+        return Some(PullUpdate {
+            percent: Some(100),
+            message: "storing signatures...",
+        });
+    }
+    if lower.contains("trying to pull") {
+        return Some(PullUpdate {
+            percent: Some(5),
+            message: "connecting to registry...",
+        });
+    }
+    None
+}
+
+fn parse_transfer_percent(line: &str) -> Option<u64> {
+    if let Some(pos) = line.find('%') {
+        let before = &line[..pos];
+        let num_str: String = before.chars().rev().take_while(|c| c.is_ascii_digit()).collect();
+        let num_str: String = num_str.chars().rev().collect();
+        if let Ok(pct) = num_str.parse::<u64>() {
+            return Some(pct.min(100));
+        }
+    }
+    if let Some((left, right)) = line.split_once('/') {
+        let left_val = extract_first_number(left.trim_end());
+        let right_val = extract_first_number(right.trim_start());
+        if let (Some(cur), Some(total)) = (left_val, right_val)
+            && total > 0.0
+        {
+            let pct = (cur / total * 100.0) as u64;
+            return Some(pct.min(100));
+        }
+    }
+
+    None
+}
+
+fn extract_first_number(s: &str) -> Option<f64> {
+    let mut num_str = String::new();
+    let mut seen_digit = false;
+    for c in s.chars().rev() {
+        if c.is_ascii_digit() || (c == '.' && seen_digit) {
+            num_str.push(c);
+            seen_digit = true;
+        } else if seen_digit {
+            break;
+        }
+    }
+    let reversed: String = num_str.chars().rev().collect();
+    reversed.parse::<f64>().ok()
+}
+
 
 /// Which image a target asks for, before anything is pulled.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

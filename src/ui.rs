@@ -338,6 +338,78 @@ impl Drop for Activity {
     }
 }
 
+/// A custom progress bar for image downloads (pulls), showing progress bars, layer status,
+/// and timing without raw engine logs.
+pub struct PullProgress {
+    bar: Option<ProgressBar>,
+    started: Instant,
+    image: String,
+}
+
+impl PullProgress {
+    pub fn start(image: &str) -> Self {
+        let is_term = !quiet() && io::stderr().is_terminal();
+        action("pulling", image);
+        let bar = is_term.then(|| {
+            let pb = ProgressBar::new(100);
+            pb.set_style(
+                ProgressStyle::default_bar()
+                    .template("{prefix:.141.bold} [{bar:24.141/dim}] {wide_msg:.dim}")
+                    .unwrap_or_else(|_| ProgressStyle::default_bar())
+                    .progress_chars("━╸─"),
+            );
+            pb.set_prefix(format!("{} {}", brand("▸"), brand("pulling")));
+            pb.set_message("connecting...");
+            pb.enable_steady_tick(Duration::from_millis(80));
+            pb
+        });
+        if let Some(b) = &bar {
+            *OUTPUT.lock().unwrap_or_else(|e| e.into_inner()) = Some(b.clone());
+        }
+        Self {
+            bar,
+            started: Instant::now(),
+            image: image.to_string(),
+        }
+    }
+
+    pub fn update(&self, percent: Option<u64>, message: impl Display) {
+        if let Some(b) = &self.bar {
+            if let Some(p) = percent {
+                b.set_position(p.min(100));
+            }
+            b.set_message(message.to_string());
+        }
+    }
+
+    pub fn finish(mut self) {
+        let took = self.started.elapsed();
+        self.stop();
+        action(
+            "pulled",
+            format!("{} {}", self.image, dim(format!("({})", secs(took)))),
+        );
+    }
+
+    pub fn clear(mut self) {
+        self.stop();
+    }
+
+    fn stop(&mut self) {
+        if let Some(b) = self.bar.take() {
+            b.finish_and_clear();
+            *OUTPUT.lock().unwrap_or_else(|e| e.into_inner()) = None;
+        }
+    }
+}
+
+impl Drop for PullProgress {
+    fn drop(&mut self) {
+        self.stop();
+    }
+}
+
+
 #[cfg(test)]
 mod tests {
     use super::*;

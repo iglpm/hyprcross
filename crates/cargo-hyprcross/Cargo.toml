@@ -1,0 +1,22 @@
+[package]
+name = "cargo-hyprcross"
+version = "2027.0.0-rc.1"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+rust-version = "1.89"
+authors = ["Jonas <me@byjonas.dev>", "The Rune Project Developers"]
+description = "Cargo subcommand for hyprcross: cross-compile and cross-test Rust with Rune or Cargo"
+repository = "https://github.com/runepm/hyprcross"
+homepage = "https://runepm.com"
+documentation = "https://docs.rs/cargo-hyprcross"
+readme = "README.md"
+keywords = ["cross", "cross-compilation", "cargo-subcommand", "hyprlnk", "rune"]
+categories = ["development-tools::build-utils", "command-line-utilities"]
+
+[[bin]]
+name = "cargo-hyprcross"
+path = "src/main.rs"
+
+[dependencies]
+hyprcross = { version = "2027.0.0-rc.1", path = "../.." }
+

@@ -2,7 +2,19 @@
 
 Any target rustc knows can be built: hyprcross runs the builder with `--target`. What differs is
 where the C toolchain comes from and what runs the tests. `hyprcross targets` lists the targets
-with images and how each builds on your machine.
+and how each builds on your machine. You can filter targets by query:
+
+```console
+$ hyprcross targets "windows arm"
+Targets · 2 available matching `windows arm`
+    aarch64-pc-windows-msvc     direct     MSVC · hyprlnk
+    aarch64-pc-windows-gnullvm  container  
+
+$ hyprcross targets macos
+Targets · 2 available matching `macos`
+  ✓ x86_64-apple-darwin   direct     macOS SDK stubs · hyprlnk
+  ✓ aarch64-apple-darwin  direct     macOS SDK stubs · hyprlnk
+```
 
 ## With images
 
@@ -23,14 +35,15 @@ with a runner for `test` and `run`. The full list, with toolchain versions:
 hyprlnk links the Linux glibc and musl targets on x86-64, x86, AArch64, ARM, RISC-V 64, POWER LE,
 s390x and LoongArch64; the others link with their image's toolchain.
 
-## Without images
+## Native direct builds (without Docker)
 
 | Targets | How |
 | :--- | :--- |
-| macOS (`*-apple-darwin`) | On a Mac, directly (hyprlnk links them). Apple's SDK can't be put in a public image. |
-| Windows MSVC (`*-pc-windows-msvc`) | On Windows directly, or on Linux with an MSVC sysroot (e.g. from `xwin`) and `--engine direct`. Use `*-pc-windows-gnu` for a container. |
-| `wasm32-unknown-unknown`, other bare metal | Directly: rust-lld links them. |
+| macOS (`*-apple-darwin`) | Cross-compiled directly on Linux/Windows host without containers. hyprcross automatically bootstraps minimal SDK stubs (cached in `~/.local/share/hyprcross/sdks/MacOSX.sdk`) and links with hyprlnk. |
+| Windows MSVC (`*-pc-windows-msvc`) | On Windows directly, or on Linux with hyprlnk / MSVC sysroot. |
+| `wasm32-unknown-unknown`, bare metal | Directly: rust-lld links them. |
 | Anything else cross-rs has an image for | In cross-rs' image (`ghcr.io/cross-rs/<target>:edge`). |
+
 
 ## glibc or musl
 

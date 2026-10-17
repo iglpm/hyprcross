@@ -22,7 +22,15 @@ jobs:
         include:
           - target: x86_64-unknown-linux-gnu
             archive: tar.gz
+          - target: x86_64-unknown-linux-musl
+            archive: tar.gz
           - target: aarch64-unknown-linux-gnu
+            archive: tar.gz
+          - target: aarch64-unknown-linux-musl
+            archive: tar.gz
+          - target: armv7-unknown-linux-gnueabihf
+            archive: tar.gz
+          - target: riscv64gc-unknown-linux-gnu
             archive: tar.gz
           - target: aarch64-apple-darwin
             archive: tar.gz
@@ -30,6 +38,12 @@ jobs:
             archive: tar.gz
           - target: x86_64-pc-windows-msvc
             archive: zip
+          - target: aarch64-pc-windows-msvc
+            archive: zip
+          - target: x86_64-pc-windows-gnu
+            archive: zip
+          - target: x86_64-unknown-freebsd
+            archive: tar.gz
     steps:
       - name: Configure Git Credentials for Submodules
         env:
@@ -37,8 +51,7 @@ jobs:
         run: |
           git config --global url."https://x-access-token:${TOKEN}@github.com/".insteadOf "https://github.com/"
 
-      # hyprlnk, which hyprcross links with, is a submodule. While it is private the workflow's
-      # own token can't read it: HYPRLNK_TOKEN, with read access to both repositories, can.
+      # hyprlnk, which hyprcross links with, is a submodule.
       - name: Check out repository
         uses: actions/checkout@v4
         with:
@@ -53,7 +66,7 @@ jobs:
       - name: Set up Podman and build environment
         run: |
           sudo apt-get update
-          sudo apt-get install -y podman uidmap slirp4netns
+          sudo apt-get install -y podman uidmap slirp4netns zip
           podman info || true
 
       - name: Build hyprcross and cargo-hyprcross locally first
@@ -67,9 +80,7 @@ jobs:
         env:
           HYPRCROSS_CONTAINER_ENGINE: podman
         run: |
-          # Nutzt das frisch gebaute hyprcross im PATH für das spezifische Target
-          hyprcross cross build --release --locked --target ${{ matrix.target }} || \
-          cargo run --release -p hyprcross -- cross build --release --locked --target ${{ matrix.target }}
+          hyprcross build --release --locked --target ${{ matrix.target }} -p hyprcross -p cargo-hyprcross
 
       - name: Package release asset (Unix)
         if: matrix.archive == 'tar.gz'
@@ -113,8 +124,39 @@ jobs:
           path: |
             hyprcross-${{ matrix.target }}.*
 
-  publish:
+  publish-crates:
+    name: Publish to Crates.io
     needs: build
+    runs-on: [self-hosted, Linux, X64, ci]
+    steps:
+      - name: Configure Git Credentials for Submodules
+        env:
+          TOKEN: ${{ secrets.RUNIFIED_TOKEN || secrets.HYPRLNK_TOKEN || github.token }}
+        run: |
+          git config --global url."https://x-access-token:${TOKEN}@github.com/".insteadOf "https://github.com/"
+
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          token: ${{ secrets.RUNIFIED_TOKEN || secrets.HYPRLNK_TOKEN || github.token }}
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Publish hyprcross
+        run: |
+          cargo publish -p hyprcross --token "${{ secrets.CRATESIO_TOKEN }}"
+
+      - name: Wait for crates.io index propagation
+        run: sleep 20
+
+      - name: Publish cargo-hyprcross
+        run: |
+          cargo publish -p cargo-hyprcross --token "${{ secrets.CRATESIO_TOKEN }}"
+
+  publish:
+    needs: [build, publish-crates]
     runs-on: [self-hosted, Linux, X64, ci]
     steps:
       - name: Configure Git Credentials for Submodules
@@ -134,23 +176,32 @@ jobs:
           path: dist
           merge-multiple: true
 
-      - name: Release notes
+      - name: Generate release notes
         run: |
-          version="${GITHUB_REF_NAME#v}"
-          if [ -f CHANGELOG.md ]; then
-            awk -v v="$version" '
-              $0 ~ "^## \\[?" v "\\]?" { on = 1; next }
-              on && /^## / { exit }
-              on { print }
-            ' CHANGELOG.md > notes.md || echo "Release v$version" > notes.md
-          else
-            echo "Release v$version" > notes.md
-          fi
+          python3 scripts/generate_release_notes.py notes.md
           cat notes.md
+
+      - name: Determine release type
+        id: release_type
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          if [[ "$tag" == *"-rc"* || "$tag" == *"-beta"* || "$tag" == *"-alpha"* ]]; then
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+            echo "make_latest=false" >> "$GITHUB_OUTPUT"
+            echo "release_title=hyprcross $tag (Beta / Pre-release)" >> "$GITHUB_OUTPUT"
+          else
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+            echo "make_latest=true" >> "$GITHUB_OUTPUT"
+            echo "release_title=hyprcross $tag" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
           token: ${{ secrets.RUNIFIED_TOKEN || github.token }}
+          name: ${{ steps.release_type.outputs.release_title }}
           files: dist/*
           body_path: notes.md
+          prerelease: ${{ steps.release_type.outputs.prerelease == 'true' }}
+          make_latest: ${{ steps.release_type.outputs.make_latest }}
+

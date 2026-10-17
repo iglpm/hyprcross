@@ -181,7 +181,9 @@ impl ExecutionContext {
 
     fn explain_failure(&self, engine: Engine, code: i32) {
         let t = &self.target;
-        if engine == Engine::Direct
+        if engine == Engine::Direct && t.os == TargetOs::MacOS {
+            ui::hint("if a C dependency failed to link against a missing framework, set HYPRCROSS_MACOS_SDK_PATH to a full Xcode SDK");
+        } else if engine == Engine::Direct
             && !t.is_host()
             && host_c_compiler(t).is_none()
             && !t.links_without_c_toolchain()
@@ -217,9 +219,9 @@ fn verb(subcommand: &str) -> &'static str {
     }
 }
 
-/// `auto`: on the host when it can build the target (its own target, one that needs no C
-/// toolchain, or one whose C compiler is installed), in a container when there is an image and
-/// an engine to run it, else on the host anyway.
+/// `auto`: on the host when it can build the target (its own target, macOS via SDK stubs,
+/// one that needs no C toolchain, or one whose C compiler is installed), in a container when there
+/// is an image and an engine to run it, else on the host anyway.
 pub fn auto_engine(target: &TargetInfo, config: &Config) -> Engine {
     let host = TargetInfo::parse(current_host_triple());
     let same_os_family = match (&target.os, &host.os) {
@@ -228,6 +230,9 @@ pub fn auto_engine(target: &TargetInfo, config: &Config) -> Engine {
         _ => false,
     };
     if target.is_host() || same_os_family || target.links_without_c_toolchain() {
+        return Engine::Direct;
+    }
+    if target.os == TargetOs::MacOS {
         return Engine::Direct;
     }
     if host_c_compiler(target).is_some() {
@@ -243,6 +248,7 @@ pub fn auto_engine(target: &TargetInfo, config: &Config) -> Engine {
         Engine::Direct
     }
 }
+
 
 /// Write a Hyprcross.toml for `target` in the current directory.
 pub fn init_project(target: Option<&str>) -> Result<()> {

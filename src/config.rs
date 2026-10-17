@@ -368,6 +368,28 @@ pub fn cache_dir() -> Option<PathBuf> {
         .map(|d| d.join("hyprcross"))
 }
 
+/// Linux: `$XDG_DATA_HOME/hyprcross`, else `~/.local/share/hyprcross`.
+/// Windows: `%LOCALAPPDATA%\hyprcross`, else `%USERPROFILE%\AppData\Local\hyprcross`.
+pub fn data_dir() -> Option<PathBuf> {
+    #[cfg(windows)]
+    {
+        std::env::var_os("LOCALAPPDATA")
+            .filter(|d| !d.is_empty())
+            .map(PathBuf::from)
+            .or_else(|| dirs_home().map(|h| h.join("AppData").join("Local")))
+            .map(|d| d.join("hyprcross"))
+    }
+    #[cfg(not(windows))]
+    {
+        std::env::var_os("XDG_DATA_HOME")
+            .filter(|d| !d.is_empty())
+            .map(PathBuf::from)
+            .or_else(|| dirs_home().map(|h| h.join(".local").join("share")))
+            .map(|d| d.join("hyprcross"))
+    }
+}
+
+
 #[cfg(test)]
 mod tests {
     use super::*;

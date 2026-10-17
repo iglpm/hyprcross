@@ -93,13 +93,15 @@ fn help_lists_the_commands() {
 
 #[test]
 fn cargo_subcommand_form_is_accepted() {
-    let out = Command::new(env!("CARGO_BIN_EXE_cargo-hyprcross"))
+    let out = Command::new(env!("CARGO_BIN_EXE_hyprcross"))
         .args(["hyprcross", "--version"])
         .output()
         .unwrap();
     assert!(out.status.success());
     assert!(String::from_utf8_lossy(&out.stdout).contains(hyprcross::VERSION));
 }
+
+
 
 #[test]
 fn a_build_without_a_target_says_how_to_give_one() {
