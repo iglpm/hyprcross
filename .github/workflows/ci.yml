@@ -29,14 +29,13 @@ jobs:
           - name: windows
             os: windows-latest
     steps:
-      - name: Configure Git for CI & Submodules (macOS Fix)
+      # Git Credentials global nur für Nicht-macOS setzen, um Hängenbleiben im Keychain zu verhindern
+      - name: Configure Git Credentials for Submodules (Non-macOS)
+        if: runner.os != 'macOS'
         env:
           TOKEN: ${{ secrets.RUNIFIED_TOKEN || secrets.HYPRLNK_TOKEN || github.token }}
         run: |
-          git config --global --unset credential.helper || true
           git config --global url."https://x-access-token:${TOKEN}@github.com/".insteadOf "https://github.com/"
-          git config --global url."https://github.com/".insteadOf "git://github.com/"
-          git config --global url."https://github.com/".insteadOf "ssh://git@github.com/"
 
       # hyprlnk, which hyprcross links with, is a submodule.
       - uses: actions/checkout@v4
@@ -66,11 +65,10 @@ jobs:
     name: Image scripts
     runs-on: [self-hosted, ci]
     steps:
-      - name: Configure Git for CI & Submodules
+      - name: Configure Git Credentials for Submodules
         env:
           TOKEN: ${{ secrets.RUNIFIED_TOKEN || secrets.HYPRLNK_TOKEN || github.token }}
         run: |
-          git config --global --unset credential.helper || true
           git config --global url."https://x-access-token:${TOKEN}@github.com/".insteadOf "https://github.com/"
 
       - uses: actions/checkout@v4
