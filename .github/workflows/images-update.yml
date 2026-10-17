@@ -22,7 +22,7 @@ permissions:
 jobs:
   update:
     name: Update image tools
-    runs-on: [self-hosted, ci]
+    runs-on: [self-hosted, Linux, X64, ci]
     steps:
       - name: Configure Git Credentials for Submodules
         env:
@@ -51,7 +51,7 @@ jobs:
         if: steps.pins.outputs.changes != ''
         uses: peter-evans/create-pull-request@v7
         with:
-          token: ${{ secrets.HYPRCROSS_BOT_TOKEN || secrets.RUNIFIED_TOKEN || secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.RUNIFIED_TOKEN || secrets.GITHUB_TOKEN }}
           branch: bot/image-tools
           delete-branch: true
           commit-message: |
@@ -76,7 +76,7 @@ jobs:
         if: steps['pr'].outputs.pull-request-number != ''
         timeout-minutes: 300
         env:
-          GH_TOKEN: ${{ secrets.HYPRCROSS_BOT_TOKEN || secrets.RUNIFIED_TOKEN }}
+          GH_TOKEN: ${{ secrets.RUNIFIED_TOKEN }}
           PR: ${{ steps['pr'].outputs.pull-request-number }}
         run: |
           if [ -z "$GH_TOKEN" ]; then

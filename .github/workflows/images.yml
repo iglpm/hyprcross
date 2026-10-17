@@ -41,7 +41,7 @@ env:
 jobs:
   plan:
     name: Plan
-    runs-on: [self-hosted, docker-builds]
+    runs-on: [self-hosted, Linux, X64, docker-builds]
     outputs:
       matrix: ${{ steps.matrix.outputs.matrix }}
       prefix: ${{ steps.prefix.outputs.prefix }}
@@ -50,14 +50,14 @@ jobs:
     steps:
       - name: Configure Git Credentials for Submodules
         env:
-          TOKEN: ${{ secrets.RUNIFIED_TOKEN || secrets.HYPRLNK_TOKEN || github.token }}
+          TOKEN: ${{ secrets.RUNIFIED_TOKEN || github.token }}
         run: |
           git config --global url."https://x-access-token:${TOKEN}@github.com/".insteadOf "https://github.com/"
 
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          token: ${{ secrets.RUNIFIED_TOKEN || secrets.HYPRLNK_TOKEN || github.token }}
+          token: ${{ secrets.RUNIFIED_TOKEN || github.token }}
 
       - id: prefix
         name: Image prefix
@@ -118,11 +118,11 @@ jobs:
 
   hyprcross:
     name: Build hyprcross
-    runs-on: [self-hosted, docker-builds]
+    runs-on: [self-hosted, Linux, X64, docker-builds]
     steps:
       - name: Configure Git Credentials for Submodules
         env:
-          TOKEN: ${{ secrets.RUNIFIED_TOKEN || secrets.HYPRLNK_TOKEN || github.token }}
+          TOKEN: ${{ secrets.RUNIFIED_TOKEN || github.token }}
         run: |
           git config --global url."https://x-access-token:${TOKEN}@github.com/".insteadOf "https://github.com/"
 
@@ -131,7 +131,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
-          token: ${{ secrets.RUNIFIED_TOKEN || secrets.HYPRLNK_TOKEN || github.token }}
+          token: ${{ secrets.RUNIFIED_TOKEN || github.token }}
 
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
@@ -147,7 +147,7 @@ jobs:
     name: ${{ matrix.target }}
     needs: [plan, hyprcross]
     if: needs.plan.outputs.matrix != '[]'
-    runs-on: [self-hosted, docker-builds]
+    runs-on: [self-hosted, Linux, X64, docker-builds]
     timeout-minutes: 120
     strategy:
       fail-fast: false
@@ -159,13 +159,13 @@ jobs:
     steps:
       - name: Configure Git Credentials for Submodules
         env:
-          TOKEN: ${{ secrets.RUNIFIED_TOKEN || secrets.HYPRLNK_TOKEN || github.token }}
+          TOKEN: ${{ secrets.RUNIFIED_TOKEN || github.token }}
         run: |
           git config --global url."https://x-access-token:${TOKEN}@github.com/".insteadOf "https://github.com/"
 
       - uses: actions/checkout@v4
         with:
-          token: ${{ secrets.RUNIFIED_TOKEN || secrets.HYPRLNK_TOKEN || github.token }}
+          token: ${{ secrets.RUNIFIED_TOKEN || github.token }}
 
       - name: Make room
         # Android's NDK and the from-source musl toolchains need more disk than runners have free.

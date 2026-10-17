@@ -22,7 +22,7 @@ env:
 jobs:
   wiki-sync:
     name: Publish Documentation to Wiki
-    runs-on: [self-hosted, ci]
+    runs-on: [self-hosted, Linux, X64, ci]
     steps:
       - name: Configure Git Credentials for Submodules / Wiki
         env:

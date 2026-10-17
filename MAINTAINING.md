@@ -158,7 +158,7 @@ edit the docs in the repository, not in the wiki: the next sync overwrites wiki 
 
 1. Set `version` in `Cargo.toml` (and `Cargo.lock`, with `cargo update -p hyprcross`) and move
    the changelog's entries under the new version.
-2. Tag and push: `git tag v0.2.0 && git push origin v0.2.0`.
+2. Tag and push: `git tag v2027.0.0 && git push origin v2027.0.0`.
 
 The Release workflow builds `hyprcross` and `cargo-hyprcross` for Linux (x86-64 glibc and
 musl, aarch64), macOS (arm64, x86-64) and Windows (x64), and attaches them, with SHA-256
