@@ -63,11 +63,30 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
-      - name: Set up Podman and build environment
+      - name: Configure container and build environment
         run: |
-          sudo apt-get update
-          sudo apt-get install -y podman uidmap slirp4netns zip
-          podman info || true
+          mkdir -p "${RUNNER_TEMP}/.docker"
+          echo "DOCKER_CONFIG=${RUNNER_TEMP}/.docker" >> "$GITHUB_ENV"
+
+          if command -v docker >/dev/null 2>&1; then
+            echo "Found Docker engine: $(docker --version)"
+            echo "HYPRCROSS_CONTAINER_ENGINE=docker" >> "$GITHUB_ENV"
+          elif command -v podman >/dev/null 2>&1; then
+            echo "Found Podman engine: $(podman --version)"
+            echo "HYPRCROSS_CONTAINER_ENGINE=podman" >> "$GITHUB_ENV"
+          else
+            echo "No container engine found; acquiring lock to install..."
+            (
+              flock -x 200
+              while sudo fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 || sudo fuser /var/lib/apt/lists/lock >/dev/null 2>&1; do
+                echo "Waiting for concurrent apt-get lock to release..."
+                sleep 2
+              done
+              sudo apt-get update -y || true
+              sudo apt-get install -y podman uidmap slirp4netns
+            ) 200>/tmp/runner-apt.lock
+            echo "HYPRCROSS_CONTAINER_ENGINE=podman" >> "$GITHUB_ENV"
+          fi
 
       - name: Build hyprcross and cargo-hyprcross locally first
         env:
@@ -77,8 +96,6 @@ jobs:
           echo "$PWD/target/release" >> $GITHUB_PATH
 
       - name: Cross-compile target with hyprcross
-        env:
-          HYPRCROSS_CONTAINER_ENGINE: podman
         run: |
           hyprcross build --release --locked --target ${{ matrix.target }} -p hyprcross -p cargo-hyprcross
 
@@ -113,7 +130,11 @@ jobs:
           cp "$bin_dir/hyprcross.exe" "$bin_dir/cargo-hyprcross.exe" README.md LICENSE*.md package/ 2>/dev/null || cp "$bin_dir/hyprcross.exe" "$bin_dir/cargo-hyprcross.exe" package/
 
           cd package
-          zip -r ../hyprcross-${{ matrix.target }}.zip *
+          if command -v zip >/dev/null 2>&1; then
+            zip -r ../hyprcross-${{ matrix.target }}.zip *
+          else
+            python3 -c "import shutil; shutil.make_archive('../hyprcross-${{ matrix.target }}', 'zip', '.')"
+          fi
           cd ..
           sha256sum hyprcross-${{ matrix.target }}.zip > hyprcross-${{ matrix.target }}.zip.sha256
 
