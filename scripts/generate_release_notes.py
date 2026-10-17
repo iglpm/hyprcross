@@ -49,20 +49,17 @@ def main():
     if not changelog_section:
         changelog_section = f"### What's Changed in hyprcross {tag}\n\nSee full changelog in [CHANGELOG.md](https://github.com/runepm/hyprcross/blob/main/CHANGELOG.md)."
 
-    # 3. Define all supported release targets and packages
+    # 3. Define all supported release targets and packages (x86 & ARM for Linux, macOS, and Windows)
     targets = [
         ("Linux (glibc)", "x86_64", "x86_64-unknown-linux-gnu", "tar.gz", "Standard 64-bit Linux (Ubuntu, Debian, Fedora, Arch, CentOS)"),
         ("Linux (musl static)", "x86_64", "x86_64-unknown-linux-musl", "tar.gz", "Statically linked Linux binary (Alpine Linux, scratch containers)"),
         ("Linux ARM64 (glibc)", "aarch64", "aarch64-unknown-linux-gnu", "tar.gz", "64-bit ARM Linux (Raspberry Pi 4/5 64-bit, AWS Graviton, server ARM)"),
         ("Linux ARM64 (musl static)", "aarch64", "aarch64-unknown-linux-musl", "tar.gz", "Statically linked 64-bit ARM Linux (Alpine ARM64)"),
-        ("Linux ARMv7 (hard-float)", "armv7", "armv7-unknown-linux-gnueabihf", "tar.gz", "32-bit ARM Linux (Raspberry Pi 2/3 32-bit, BeagleBone)"),
-        ("Linux RISC-V 64", "riscv64", "riscv64gc-unknown-linux-gnu", "tar.gz", "64-bit RISC-V Linux boards and QEMU emulators"),
         ("macOS Apple Silicon", "Apple Silicon (M1–M4)", "aarch64-apple-darwin", "tar.gz", "Apple Silicon Macs (arm64) running macOS 11+"),
         ("macOS Intel", "x86_64", "x86_64-apple-darwin", "tar.gz", "Intel-based Macs (x86_64) running macOS 10.12+"),
         ("Windows (MSVC)", "x86_64", "x86_64-pc-windows-msvc", "zip", "64-bit Windows (MSVC native ABI)"),
         ("Windows ARM64 (MSVC)", "aarch64", "aarch64-pc-windows-msvc", "zip", "Windows 11 on ARM (Snapdragon X Elite, Surface Pro ARM)"),
         ("Windows (MinGW/GNU)", "x86_64", "x86_64-pc-windows-gnu", "zip", "64-bit Windows (GNU / MinGW-w64 toolchain)"),
-        ("FreeBSD", "x86_64", "x86_64-unknown-freebsd", "tar.gz", "FreeBSD 13+ on 64-bit x86"),
     ]
 
     table_rows = []
