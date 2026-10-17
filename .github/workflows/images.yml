@@ -48,7 +48,7 @@ jobs:
       push: ${{ steps.push.outputs.push }}
       refresh: ${{ steps.refresh.outputs.week }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -115,7 +115,7 @@ jobs:
     steps:
       # hyprlnk, which hyprcross links with, is a submodule. While it is private the workflow's
       # own token can't read it: HYPRLNK_TOKEN, with read access to both repositories, can.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           submodules: recursive
           token: ${{ secrets.HYPRLNK_TOKEN || github.token }}
@@ -143,7 +143,7 @@ jobs:
       IMAGE: ${{ needs.plan.outputs.prefix }}/${{ matrix.target }}
       SMOKE_IMAGE: hyprcross-smoke/${{ matrix.target }}:ci
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Make room
         # Android's NDK and the from-source musl toolchains need more disk than runners have free.
