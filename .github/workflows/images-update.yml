@@ -22,9 +22,17 @@ permissions:
 jobs:
   update:
     name: Update image tools
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, ci]
     steps:
-      - uses: actions/checkout@v7
+      - name: Configure Git Credentials for Submodules
+        env:
+          TOKEN: ${{ secrets.RUNIFIED_TOKEN || secrets.HYPRLNK_TOKEN || github.token }}
+        run: |
+          git config --global url."https://x-access-token:${TOKEN}@github.com/".insteadOf "https://github.com/"
+
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.RUNIFIED_TOKEN || secrets.HYPRLNK_TOKEN || github.token }}
 
       - id: pins
         name: Newest releases
@@ -43,7 +51,7 @@ jobs:
         if: steps.pins.outputs.changes != ''
         uses: peter-evans/create-pull-request@v7
         with:
-          token: ${{ secrets.HYPRCROSS_BOT_TOKEN || secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.HYPRCROSS_BOT_TOKEN || secrets.RUNIFIED_TOKEN || secrets.GITHUB_TOKEN }}
           branch: bot/image-tools
           delete-branch: true
           commit-message: |
@@ -65,11 +73,11 @@ jobs:
             docker
 
       - name: Merge once its checks pass
-        if: steps.pr.outputs.pull-request-number != ''
+        if: steps['pr'].outputs.pull-request-number != ''
         timeout-minutes: 300
         env:
-          GH_TOKEN: ${{ secrets.HYPRCROSS_BOT_TOKEN }}
-          PR: ${{ steps.pr.outputs.pull-request-number }}
+          GH_TOKEN: ${{ secrets.HYPRCROSS_BOT_TOKEN || secrets.RUNIFIED_TOKEN }}
+          PR: ${{ steps['pr'].outputs.pull-request-number }}
         run: |
           if [ -z "$GH_TOKEN" ]; then
             echo "::notice::No HYPRCROSS_BOT_TOKEN: pull request #$PR waits for a person."
