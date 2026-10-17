@@ -22,15 +22,23 @@ env:
 jobs:
   wiki-sync:
     name: Publish Documentation to Wiki
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, ci]
     steps:
+      - name: Configure Git Credentials for Submodules / Wiki
+        env:
+          TOKEN: ${{ secrets.RUNIFIED_TOKEN || secrets.HYPRLNK_TOKEN || github.token }}
+        run: |
+          git config --global url."https://x-access-token:${TOKEN}@github.com/".insteadOf "https://github.com/"
+
       - name: Check out repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.RUNIFIED_TOKEN || secrets.HYPRLNK_TOKEN || github.token }}
 
       - name: Check repository visibility and wiki status
         id: check-wiki
         env:
-          AUTH_TOKEN: ${{ secrets.RUNIFIED_TOKEN || secrets.GITHUB_TOKEN }}
+          AUTH_TOKEN: ${{ secrets.RUNIFIED_TOKEN || secrets.HYPRLNK_TOKEN || github.token }}
         run: |
           set -e
           REPO_INFO=$(curl -sSL \
@@ -59,9 +67,9 @@ jobs:
           echo "skip=false" >> "$GITHUB_OUTPUT"
 
       - name: Synchronize docs to GitHub Wiki
-        if: steps.check-wiki.outputs.skip != 'true'
+        if: steps['check-wiki'].outputs.skip != 'true'
         env:
-          AUTH_TOKEN: ${{ secrets.RUNIFIED_TOKEN || secrets.GITHUB_TOKEN }}
+          AUTH_TOKEN: ${{ secrets.RUNIFIED_TOKEN || secrets.HYPRLNK_TOKEN || github.token }}
         run: |
           set -e
           WIKI_URL="https://x-access-token:${AUTH_TOKEN}@github.com/${{ github.repository }}.wiki.git"
