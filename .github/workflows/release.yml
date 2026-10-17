@@ -78,7 +78,7 @@ jobs:
           sha256sum hyprcross-${{ matrix.target }}.zip > hyprcross-${{ matrix.target }}.zip.sha256
 
       - name: Upload release assets
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         if: startsWith(github.ref, 'refs/tags/')
         with:
           files: |
