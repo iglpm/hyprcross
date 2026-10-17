@@ -13,73 +13,144 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  publish-release:
+  build:
     name: Build Release Asset (${{ matrix.target }})
-    runs-on: ${{ matrix.os }}
+    runs-on: [self-hosted, docker-builds]
     strategy:
       fail-fast: false
       matrix:
         include:
           - target: x86_64-unknown-linux-gnu
-            os: ubuntu-latest
-            archive: tar.gz
-          - target: x86_64-unknown-linux-musl
-            os: ubuntu-latest
             archive: tar.gz
           - target: aarch64-unknown-linux-gnu
-            os: ubuntu-24.04-arm
             archive: tar.gz
           - target: aarch64-apple-darwin
-            os: macos-latest
             archive: tar.gz
           - target: x86_64-apple-darwin
-            os: macos-15-intel
             archive: tar.gz
           - target: x86_64-pc-windows-msvc
-            os: windows-latest
             archive: zip
     steps:
+      - name: Configure Git Credentials for Submodules
+        env:
+          TOKEN: ${{ secrets.RUNIFIED_TOKEN || secrets.HYPRLNK_TOKEN || github.token }}
+        run: |
+          git config --global url."https://x-access-token:${TOKEN}@github.com/".insteadOf "https://github.com/"
+
       # hyprlnk, which hyprcross links with, is a submodule. While it is private the workflow's
       # own token can't read it: HYPRLNK_TOKEN, with read access to both repositories, can.
       - name: Check out repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@v4
         with:
           submodules: recursive
-          token: ${{ secrets.HYPRLNK_TOKEN || github.token }}
+          token: ${{ secrets.RUNIFIED_TOKEN || secrets.HYPRLNK_TOKEN || github.token }}
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
 
-      # zstd and mimalloc compile C: musl targets need musl's compiler.
-      - name: Install musl tools
-        if: contains(matrix.target, 'musl')
-        run: sudo apt-get update && sudo apt-get install -y musl-tools
+      - name: Set up Podman and build environment
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y podman uidmap slirp4netns
+          podman info || true
 
-      - name: Build release binaries
-        run: cargo build --release --locked --target ${{ matrix.target }}
+      - name: Build hyprcross and cargo-hyprcross locally first
+        env:
+          RUSTFLAGS: "-D warnings"
+        run: |
+          cargo build --release --locked -p hyprcross -p cargo-hyprcross
+          echo "$PWD/target/release" >> $GITHUB_PATH
+
+      - name: Cross-compile target with hyprcross
+        env:
+          HYPRCROSS_CONTAINER_ENGINE: podman
+        run: |
+          # Nutzt das frisch gebaute hyprcross im PATH für das spezifische Target
+          hyprcross cross build --release --locked --target ${{ matrix.target }} || \
+          cargo run --release -p hyprcross -- cross build --release --locked --target ${{ matrix.target }}
 
       - name: Package release asset (Unix)
         if: matrix.archive == 'tar.gz'
         run: |
-          cd target/${{ matrix.target }}/release
-          tar -czf ../../../hyprcross-${{ matrix.target }}.tar.gz hyprcross cargo-hyprcross
-          cd ../../..
-          shasum -a 256 hyprcross-${{ matrix.target }}.tar.gz > hyprcross-${{ matrix.target }}.tar.gz.sha256
+          bin_dir="target/${{ matrix.target }}/release"
+          if [ ! -d "$bin_dir" ]; then
+            bin_dir=".rune/target/${{ matrix.target }}/release"
+          fi
+          
+          mkdir -p package
+          cp "$bin_dir/hyprcross" "$bin_dir/cargo-hyprcross" README.md LICENSE*.md package/ 2>/dev/null || cp "$bin_dir/hyprcross" "$bin_dir/cargo-hyprcross" package/
+          
+          tar -czf hyprcross-${{ matrix.target }}.tar.gz -C package .
+          if command -v sha256sum >/dev/null; then
+            sha256sum hyprcross-${{ matrix.target }}.tar.gz > hyprcross-${{ matrix.target }}.tar.gz.sha256
+          else
+            shasum -a 256 hyprcross-${{ matrix.target }}.tar.gz > hyprcross-${{ matrix.target }}.tar.gz.sha256
+          fi
 
       - name: Package release asset (Windows)
         if: matrix.archive == 'zip'
         shell: bash
         run: |
-          cd target/${{ matrix.target }}/release
-          7z a ../../../hyprcross-${{ matrix.target }}.zip hyprcross.exe cargo-hyprcross.exe
-          cd ../../..
+          bin_dir="target/${{ matrix.target }}/release"
+          if [ ! -d "$bin_dir" ]; then
+            bin_dir=".rune/target/${{ matrix.target }}/release"
+          fi
+
+          mkdir -p package
+          cp "$bin_dir/hyprcross.exe" "$bin_dir/cargo-hyprcross.exe" README.md LICENSE*.md package/ 2>/dev/null || cp "$bin_dir/hyprcross.exe" "$bin_dir/cargo-hyprcross.exe" package/
+
+          cd package
+          zip -r ../hyprcross-${{ matrix.target }}.zip *
+          cd ..
           sha256sum hyprcross-${{ matrix.target }}.zip > hyprcross-${{ matrix.target }}.zip.sha256
 
-      - name: Upload release assets
-        uses: softprops/action-gh-release@v3
-        if: startsWith(github.ref, 'refs/tags/')
+      - name: Upload intermediate artifacts
+        uses: actions/upload-artifact@v4
         with:
-          files: |
+          name: asset-${{ matrix.target }}
+          path: |
             hyprcross-${{ matrix.target }}.*
+
+  publish:
+    needs: build
+    runs-on: [self-hosted, ci]
+    steps:
+      - name: Configure Git Credentials for Submodules
+        env:
+          TOKEN: ${{ secrets.RUNIFIED_TOKEN || secrets.HYPRLNK_TOKEN || github.token }}
+        run: |
+          git config --global url."https://x-access-token:${TOKEN}@github.com/".insteadOf "https://github.com/"
+
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.RUNIFIED_TOKEN || secrets.HYPRLNK_TOKEN || github.token }}
+
+      - name: Download all release assets
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Release notes
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          if [ -f CHANGELOG.md ]; then
+            awk -v v="$version" '
+              $0 ~ "^## \\[?" v "\\]?" { on = 1; next }
+              on && /^## / { exit }
+              on { print }
+            ' CHANGELOG.md > notes.md || echo "Release v$version" > notes.md
+          else
+            echo "Release v$version" > notes.md
+          fi
+          cat notes.md
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          token: ${{ secrets.RUNIFIED_TOKEN || secrets.HYPRLNK_TOKEN || github.token }}
+          files: dist/*
+          body_path: notes.md
