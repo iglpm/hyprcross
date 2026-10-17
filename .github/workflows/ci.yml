@@ -23,7 +23,7 @@ jobs:
       matrix:
         include:
           - name: linux
-            os: ci
+            os: [self-hosted, Linux, ci]
           - name: macos
             os: macos-latest
           - name: windows
@@ -63,7 +63,7 @@ jobs:
 
   scripts:
     name: Image scripts
-    runs-on: ci
+    runs-on: [self-hosted, Linux, ci]
     steps:
       - name: Configure Git Credentials for Submodules
         env:
