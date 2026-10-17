@@ -57,6 +57,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          submodules: recursive
           token: ${{ secrets.RUNIFIED_TOKEN || github.token }}
 
       - id: prefix
@@ -71,7 +72,7 @@ jobs:
 
       - id: refresh
         name: Package refresh key
-        run: echo "week=$(date -u +\%G-W\%V)" >> "$GITHUB_OUTPUT"
+        run: echo "week=$(date -u +%G-W%V)" >> "$GITHUB_OUTPUT"
 
       - id: matrix
         name: Targets
@@ -95,12 +96,12 @@ jobs:
                 hyprlnk) if [ "$EVENT" = pull_request ]; then all=true; fi ;;
                 docker/Dockerfile.*)
                   # A deleted Dockerfile has nothing to build.
-                  if [ -f "$f" ]; then targets="$targets${f#docker/Dockerfile.}"; fi ;;
+                  if [ -f "$f" ]; then targets="$targets ${f#docker/Dockerfile.}"; fi ;;
                 docker/README.md | docker/update-pins.sh) ;;
                 docker/*)
                   users="$(grep -lF "${f#docker/}" docker/Dockerfile.* || true)"
                   if [ -z "$users" ]; then all=true; fi
-                  for u in $users; do targets="$targets${u#docker/Dockerfile.}"; done ;;
+                  for u in $users; do targets="$targets ${u#docker/Dockerfile.}"; done ;;
                 *) all=true ;;
               esac
             done
@@ -110,7 +111,7 @@ jobs:
               echo "matrix=[]" >> "$GITHUB_OUTPUT"
               exit 0
             else
-              targets="$(printf '\%s\n'$targets | sort -u | tr '\n' ' ')"
+              targets="$(printf '%s\n' $targets | sort -u | tr '\n' ' ')"
             fi
           fi
           read -ra list <<< "$targets"
@@ -165,13 +166,8 @@ jobs:
 
       - uses: actions/checkout@v4
         with:
+          submodules: recursive
           token: ${{ secrets.RUNIFIED_TOKEN || github.token }}
-
-      - name: Make room
-        # Android's NDK and the from-source musl toolchains need more disk than runners have free.
-        run: |
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
-          df -h /
 
       - uses: docker/setup-qemu-action@v3
         if: contains(matrix.platforms, ',')
@@ -227,5 +223,23 @@ jobs:
           HYPRCROSS_CONTAINER_ENGINE: docker
           HYPRCROSS_IMAGE_REPOSITORY: hyprcross-smoke
           HYPRCROSS_IMAGE_TAG: ci
+          RUNNER_TEMP_DIR: ${{ runner.temp }}
         run: |
-          hyprcross="${{ runner.temp }}/hyprcross/hy
+          hyprcross="$RUNNER_TEMP_DIR/hyprcross/hyprcross"
+          chmod +x "$hyprcross"
+          "$hyprcross" ${{ matrix.smoke }} -v -t ${{ matrix.target }} --engine container --builder cargo
+          "$hyprcross" daemon stop --all
+
+      - name: Push
+        if: needs.plan.outputs.push == 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: docker
+          file: docker/Dockerfile.${{ matrix.target }}
+          platforms: ${{ matrix.platforms }}
+          push: true
+          provenance: false
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: HYPRCROSS_REFRESH=${{ needs.plan.outputs.refresh }}
+          cache-from: type=registry,ref=${{ env.IMAGE }}:buildcache
