@@ -16,19 +16,30 @@ env:
 
 jobs:
   check-and-test:
-    name: Test (${{ matrix.os }})
+    name: Test (${{ matrix.name }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, macos-latest, windows-latest]
+        include:
+          - name: linux
+            os: [self-hosted, ci]
+          - name: macos
+            os: macos-latest
+          - name: windows
+            os: windows-latest
     steps:
-      # hyprlnk, which hyprcross links with, is a submodule. While it is private the workflow's
-      # own token can't read it: HYPRLNK_TOKEN, with read access to both repositories, can.
-      - uses: actions/checkout@v7
+      - name: Configure Git Credentials for Submodules
+        env:
+          TOKEN: ${{ secrets.RUNIFIED_TOKEN || secrets.HYPRLNK_TOKEN || github.token }}
+        run: |
+          git config --global url."https://x-access-token:${TOKEN}@github.com/".insteadOf "https://github.com/"
+
+      # hyprlnk, which hyprcross links with, is a submodule.
+      - uses: actions/checkout@v4
         with:
           submodules: recursive
-          token: ${{ secrets.HYPRLNK_TOKEN || github.token }}
+          token: ${{ secrets.RUNIFIED_TOKEN || secrets.HYPRLNK_TOKEN || github.token }}
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -50,9 +61,18 @@ jobs:
 
   scripts:
     name: Image scripts
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, ci]
     steps:
-      - uses: actions/checkout@v7
+      - name: Configure Git Credentials for Submodules
+        env:
+          TOKEN: ${{ secrets.RUNIFIED_TOKEN || secrets.HYPRLNK_TOKEN || github.token }}
+        run: |
+          git config --global url."https://x-access-token:${TOKEN}@github.com/".insteadOf "https://github.com/"
+
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.RUNIFIED_TOKEN || secrets.HYPRLNK_TOKEN || github.token }}
+
       - name: shellcheck
         working-directory: docker
         run: shellcheck -x scripts/*.sh scripts/hyprcross-runner matrix.sh update-pins.sh
