@@ -389,7 +389,6 @@ pub fn data_dir() -> Option<PathBuf> {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;

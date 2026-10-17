@@ -101,8 +101,6 @@ fn cargo_subcommand_form_is_accepted() {
     assert!(String::from_utf8_lossy(&out.stdout).contains(hyprcross::VERSION));
 }
 
-
-
 #[test]
 fn a_build_without_a_target_says_how_to_give_one() {
     let dir = tempfile::tempdir().unwrap();

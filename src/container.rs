@@ -154,7 +154,6 @@ impl ContainerEngine {
             }
         });
 
-
         let mut error_lines: Vec<String> = Vec::new();
         while let Ok(line) = rx.recv() {
             let trimmed = line.trim();
@@ -178,7 +177,6 @@ impl ContainerEngine {
         let joined = error_lines.join("\n");
         bail!("{}", last_error_line(joined.as_bytes(), "the pull failed"))
     }
-
 
     /// Build `tag` from `dockerfile`, with its directory as the context.
     pub fn build_image(&self, dockerfile: &Path, tag: &str, base: Option<&str>) -> Result<()> {
@@ -306,7 +304,11 @@ fn parse_pull_progress(line: &str) -> Option<PullUpdate<'_>> {
 fn parse_transfer_percent(line: &str) -> Option<u64> {
     if let Some(pos) = line.find('%') {
         let before = &line[..pos];
-        let num_str: String = before.chars().rev().take_while(|c| c.is_ascii_digit()).collect();
+        let num_str: String = before
+            .chars()
+            .rev()
+            .take_while(|c| c.is_ascii_digit())
+            .collect();
         let num_str: String = num_str.chars().rev().collect();
         if let Ok(pct) = num_str.parse::<u64>() {
             return Some(pct.min(100));
@@ -340,7 +342,6 @@ fn extract_first_number(s: &str) -> Option<f64> {
     let reversed: String = num_str.chars().rev().collect();
     reversed.parse::<f64>().ok()
 }
-
 
 /// Which image a target asks for, before anything is pulled.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

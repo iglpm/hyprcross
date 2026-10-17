@@ -2,18 +2,36 @@
 
 ## Install
 
+### Option 1: Via Cargo (Crates.io)
+
+Install both the standalone `hyprcross` CLI and the `cargo hyprcross` subcommand:
+
+```sh
+# Stable release:
+cargo install --locked hyprcross cargo-hyprcross
+
+# Or a specific pre-release version:
+cargo install --locked hyprcross cargo-hyprcross --version 2027.0.0-rc.1
+```
+
+### Option 2: Pre-compiled Binaries
+
+Standalone release archives for Linux, macOS and Windows (with SHA-256 checksums) are on the
+[GitHub Releases page](https://github.com/runepm/hyprcross/releases).
+
+### Option 3: From Source
+
 hyprcross builds with Rust 1.89 or newer. It links with hyprlnk, a submodule, so clone it with
 `--recursive` (or run `git submodule update --init` in a clone made without it):
 
 ```sh
 git clone --recursive https://github.com/runepm/hyprcross
 cd hyprcross
-cargo install --path .
+cargo install --locked --path . -p hyprcross -p cargo-hyprcross
 ```
 
-That installs `hyprcross` and `cargo-hyprcross`, so both `hyprcross build` and
-`cargo hyprcross build` work. Release archives for Linux, macOS and Windows are on the
-[releases page](https://github.com/runepm/hyprcross/releases).
+That provides `hyprcross` and `cargo-hyprcross`, so both `hyprcross build` and
+`cargo hyprcross build` work.
 
 For targets your machine can't build itself, install Podman or Docker. For running tests of other
 architectures on the host, QEMU user-mode emulation (`qemu-user-static`); the images have their

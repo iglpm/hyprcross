@@ -84,7 +84,6 @@ pub const ALL_TARGETS: &[&str] = &[
 pub const DEFAULT_IMAGE_REPOSITORY: &str = "ghcr.io/runepm/hyprcross";
 pub const DEFAULT_IMAGE_TAG: &str = "latest";
 
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TargetArch {
     X86_64,
@@ -431,7 +430,6 @@ impl TargetInfo {
         terms.iter().all(|term| self.matches_term(term))
     }
 
-
     fn matches_term(&self, term: &str) -> bool {
         let triple = self.triple.to_ascii_lowercase();
         if triple.contains(term) {
@@ -476,7 +474,6 @@ impl TargetInfo {
         &self.triple
     }
 }
-
 
 impl fmt::Display for TargetInfo {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

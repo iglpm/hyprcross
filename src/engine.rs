@@ -182,7 +182,9 @@ impl ExecutionContext {
     fn explain_failure(&self, engine: Engine, code: i32) {
         let t = &self.target;
         if engine == Engine::Direct && t.os == TargetOs::MacOS {
-            ui::hint("if a C dependency failed to link against a missing framework, set HYPRCROSS_MACOS_SDK_PATH to a full Xcode SDK");
+            ui::hint(
+                "if a C dependency failed to link against a missing framework, set HYPRCROSS_MACOS_SDK_PATH to a full Xcode SDK",
+            );
         } else if engine == Engine::Direct
             && !t.is_host()
             && host_c_compiler(t).is_none()
@@ -248,7 +250,6 @@ pub fn auto_engine(target: &TargetInfo, config: &Config) -> Engine {
         Engine::Direct
     }
 }
-
 
 /// Write a Hyprcross.toml for `target` in the current directory.
 pub fn init_project(target: Option<&str>) -> Result<()> {

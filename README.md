@@ -65,15 +65,32 @@ How it's measured, and what changed: [docs/performance.md](docs/performance.md).
 **With Rune, there is nothing to install:** hyprcross is built into it, as `rune cross` and
 `rune build --cross <target>` (see Rune's
 [cross-compilation guide](https://github.com/runepm/rune/blob/master/docs/cross-compilation.md)).
-On its own, for Cargo:
+
+### From Crates.io (Cargo)
+
+Install both the standalone `hyprcross` CLI and the `cargo hyprcross` subcommand plugin:
+
+```sh
+# Stable release:
+cargo install --locked hyprcross cargo-hyprcross
+
+# Or a specific pre-release version:
+cargo install --locked hyprcross cargo-hyprcross --version 2027.0.0-rc.1
+```
+
+### Pre-compiled Binaries
+
+Download pre-built standalone binaries directly from the [GitHub Releases page](https://github.com/runepm/hyprcross/releases) for Linux, macOS, and Windows.
+
+### From Source
 
 ```sh
 git clone --recursive https://github.com/runepm/hyprcross   # with hyprlnk, a submodule
 cd hyprcross
-cargo install --path .
+cargo install --locked --path . -p hyprcross -p cargo-hyprcross
 ```
 
-This installs `hyprcross` and `cargo-hyprcross` (for `cargo hyprcross …`). Then:
+This provides both `hyprcross` and `cargo-hyprcross` (for `cargo hyprcross …`). Then:
 
 ```sh
 hyprcross doctor     # what this machine has for cross-compiling

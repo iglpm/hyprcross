@@ -113,7 +113,10 @@ impl<'a> DirectEngine<'a> {
                 rustc_flags.push(format!("-C linker-flavor={flavor}"));
             }
             if let Some(sdk) = &macos_sdk {
-                rustc_flags.push(format!("-C link-arg=-isysroot -C link-arg={}", sdk.display()));
+                rustc_flags.push(format!(
+                    "-C link-arg=-isysroot -C link-arg={}",
+                    sdk.display()
+                ));
             }
             if !rustc_flags.is_empty() {
                 let flag = rustc_flags.join(" ");
@@ -123,7 +126,6 @@ impl<'a> DirectEngine<'a> {
                 };
             }
         }
-
 
         if matches!(subcommand, "test" | "run" | "bench") {
             let runner_var = format!("CARGO_TARGET_{key}_RUNNER");

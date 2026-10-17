@@ -409,7 +409,6 @@ impl Drop for PullProgress {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;

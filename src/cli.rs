@@ -103,7 +103,6 @@ pub enum Commands {
     /// List the targets with images, and how each builds here
     Targets(TargetsArgs),
 
-
     /// Check what cross-compiling needs on this machine
     Doctor,
 
@@ -238,4 +237,3 @@ pub struct InitArgs {
     #[arg(short, long, value_name = "TRIPLE")]
     pub target: Option<String>,
 }
-

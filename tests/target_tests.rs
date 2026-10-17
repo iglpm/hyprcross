@@ -187,4 +187,3 @@ fn test_targets_search_matching() {
     assert!(musl.matches_query(&["musl".to_string()]));
     assert!(musl.matches_query(&["linux x64".to_string()]));
 }
-

@@ -31,7 +31,6 @@ use crate::container::ContainerEngine;
 use crate::engine::{ExecutionContext, auto_engine, init_project};
 use crate::targets::{ALL_TARGETS, TargetInfo, TargetOs};
 
-
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 pub fn version() -> &'static str {
@@ -313,11 +312,7 @@ fn list_targets(config: &Config, query: &[String]) {
     ui::out(format!(
         "{} {}",
         ui::brand("Targets"),
-        ui::dim(format!(
-            "· {} available{}",
-            all.len(),
-            query_desc
-        ))
+        ui::dim(format!("· {} available{}", all.len(), query_desc))
     ));
     let mut missing = 0;
     for t in &all {
@@ -364,7 +359,6 @@ fn list_targets(config: &Config, query: &[String]) {
         }
     )));
 }
-
 
 fn daemon_command(action: DaemonAction, config: Config) -> Result<i32> {
     let engine = ContainerEngine::detect(&config.build.container_engine)?;

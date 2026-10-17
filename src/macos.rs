@@ -14,7 +14,6 @@ pub const MACOS_SDK_PRIMARY_URL: &str =
 pub const MACOS_SDK_FALLBACK_URL: &str =
     "https://github.com/joseluisq/macosx-sdks/releases/download/26.0/MacOSX26.0.sdk.tar.xz";
 
-
 /// The default filesystem location for the cached macOS SDK.
 pub fn default_sdk_path() -> PathBuf {
     crate::config::data_dir()
@@ -79,14 +78,14 @@ fn bootstrap_sdk(dest: &Path) -> Result<()> {
         "minimal macOS SDK for cross-compilation... [18.4 MB]",
     );
 
-    let temp_dir = tempfile::tempdir().context("cannot create temporary directory for SDK download")?;
+    let temp_dir =
+        tempfile::tempdir().context("cannot create temporary directory for SDK download")?;
     let tarball_path = temp_dir.path().join("MacOSX.sdk.tar.xz");
 
-    let downloaded = download_file(MACOS_SDK_PRIMARY_URL, &tarball_path)
-        .or_else(|e| {
-            ui::trace(format!("primary SDK URL failed ({e}), trying fallback..."));
-            download_file(MACOS_SDK_FALLBACK_URL, &tarball_path)
-        });
+    let downloaded = download_file(MACOS_SDK_PRIMARY_URL, &tarball_path).or_else(|e| {
+        ui::trace(format!("primary SDK URL failed ({e}), trying fallback..."));
+        download_file(MACOS_SDK_FALLBACK_URL, &tarball_path)
+    });
 
     if let Err(e) = downloaded {
         ui::trace(format!("SDK download error: {e:#}"));
@@ -110,7 +109,9 @@ fn bootstrap_sdk(dest: &Path) -> Result<()> {
     }
 
     if let Err(e) = fs::rename(&source_sdk, dest) {
-        ui::trace(format!("cannot rename {source_sdk:?} to {dest:?} ({e}); copying instead"));
+        ui::trace(format!(
+            "cannot rename {source_sdk:?} to {dest:?} ({e}); copying instead"
+        ));
         copy_dir_recursive(&source_sdk, dest)?;
     }
 
@@ -155,7 +156,10 @@ fn download_file(url: &str, dest: &Path) -> Result<()> {
     #[cfg(windows)]
     {
         if find_executable("powershell").is_some() {
-            let script = format!("Invoke-WebRequest -Uri '{url}' -OutFile '{}'", dest.display());
+            let script = format!(
+                "Invoke-WebRequest -Uri '{url}' -OutFile '{}'",
+                dest.display()
+            );
             let status = Command::new("powershell")
                 .args(["-NoProfile", "-Command", &script])
                 .status()
