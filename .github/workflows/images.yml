@@ -154,8 +154,12 @@ jobs:
     env:
       IMAGE: ${{ needs.plan.outputs.prefix }}/${{ matrix.target }}
       SMOKE_IMAGE: hyprcross-smoke/${{ matrix.target }}:ci
-      DOCKER_CONFIG: ${{ runner.temp }}/.docker
     steps:
+      - name: Isolate Docker configuration
+        run: |
+          mkdir -p "${RUNNER_TEMP}/.docker"
+          echo "DOCKER_CONFIG=${RUNNER_TEMP}/.docker" >> "$GITHUB_ENV"
+
       - name: Configure Git Credentials for Submodules
         env:
           TOKEN: ${{ secrets.RUNIFIED_TOKEN || github.token }}

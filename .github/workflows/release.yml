@@ -119,14 +119,14 @@ jobs:
     steps:
       - name: Configure Git Credentials for Submodules
         env:
-          TOKEN: ${{ secrets.RUNIFIED_TOKEN || secrets.HYPRLNK_TOKEN || github.token }}
+          TOKEN: ${{ secrets.RUNIFIED_TOKEN || github.token }}
         run: |
           git config --global url."https://x-access-token:${TOKEN}@github.com/".insteadOf "https://github.com/"
 
       - name: Check out repository
         uses: actions/checkout@v4
         with:
-          token: ${{ secrets.RUNIFIED_TOKEN || secrets.HYPRLNK_TOKEN || github.token }}
+          token: ${{ secrets.RUNIFIED_TOKEN || github.token }}
 
       - name: Download all release assets
         uses: actions/download-artifact@v4
@@ -151,6 +151,6 @@ jobs:
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
-          token: ${{ secrets.RUNIFIED_TOKEN || secrets.HYPRLNK_TOKEN || github.token }}
+          token: ${{ secrets.RUNIFIED_TOKEN || github.token }}
           files: dist/*
           body_path: notes.md
