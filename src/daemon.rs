@@ -413,14 +413,13 @@ impl<'a> ContainerDaemon<'a> {
                 let detail = msg
                     .lines()
                     .map(|l| l.trim())
-                    .filter(|l| {
+                    .rfind(|l| {
                         !l.is_empty()
                             && !l.starts_with("Run 'docker")
                             && !l.starts_with("See 'docker")
                             && !l.starts_with("Run 'podman")
                             && !l.starts_with("See 'podman")
                     })
-                    .next_back()
                     .or_else(|| msg.lines().rev().find(|l| !l.trim().is_empty()))
                     .unwrap_or("unknown error")
                     .trim();
@@ -490,7 +489,7 @@ impl<'a> ContainerDaemon<'a> {
             cmd.args(["-t", "0"]);
         }
         let _ = cmd
-            .arg(&self.container_name())
+            .arg(self.container_name())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .status();

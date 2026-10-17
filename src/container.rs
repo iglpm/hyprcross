@@ -179,17 +179,13 @@ fn reason(e: &anyhow::Error) -> String {
 
 fn last_error_line(stderr: &[u8], fallback: &str) -> String {
     let s = String::from_utf8_lossy(stderr);
-    let meaningful = s
-        .lines()
-        .map(|l| l.trim())
-        .filter(|l| {
-            !l.is_empty()
-                && !l.starts_with("Run 'docker")
-                && !l.starts_with("See 'docker")
-                && !l.starts_with("Run 'podman")
-                && !l.starts_with("See 'podman")
-        })
-        .next_back();
+    let meaningful = s.lines().map(|l| l.trim()).rfind(|l| {
+        !l.is_empty()
+            && !l.starts_with("Run 'docker")
+            && !l.starts_with("See 'docker")
+            && !l.starts_with("Run 'podman")
+            && !l.starts_with("See 'podman")
+    });
     meaningful
         .or_else(|| s.lines().rev().find(|l| !l.trim().is_empty()))
         .map(|l| l.trim().trim_start_matches("Error: ").to_string())
