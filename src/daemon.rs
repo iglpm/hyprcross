@@ -236,12 +236,20 @@ impl<'a> ContainerDaemon<'a> {
         if crate::engine::on_terminal() && crate::container::stdin_is_terminal() {
             cmd.arg("-t");
         }
-        cmd.arg("-w").arg(job.cwd);
+        let workdir = crate::container::to_container_path(job.cwd, &self.root);
+        cmd.arg("-w").arg(&workdir);
         for (k, v) in &job.env {
             cmd.arg("-e").arg(format!("{k}={v}"));
         }
+        let program = if cfg!(target_os = "linux") {
+            job.program
+        } else if job.program == "rune" {
+            "cargo"
+        } else {
+            job.program
+        };
         cmd.arg(self.container_name())
-            .arg(job.program)
+            .arg(program)
             .args(job.args);
         if !job.stdin {
             cmd.stdin(Stdio::null());

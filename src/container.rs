@@ -36,6 +36,25 @@ impl ContainerEngineKind {
         }
     }
 
+    pub fn service_hint(&self) -> &'static str {
+        match (self, std::env::consts::OS) {
+            (Self::Podman, "windows" | "macos") => {
+                "start its virtual machine (`podman machine start`) or start Podman Desktop"
+            }
+            (Self::Podman, _) => {
+                "verify podman works with `podman version` or start `podman.socket`"
+            }
+            (Self::Docker, "windows" | "macos") => {
+                "start Docker Desktop or verify your container daemon is running"
+            }
+            (Self::Docker, _) => {
+                "start its service (`sudo systemctl start docker`) or add yourself to its group"
+            }
+            (Self::Finch, _) => "start its virtual machine (`finch vm start`)",
+            (Self::Nerdctl, _) => "start containerd (`sudo systemctl start containerd`)",
+        }
+    }
+
     pub const ALL: [ContainerEngineKind; 4] =
         [Self::Podman, Self::Docker, Self::Finch, Self::Nerdctl];
 }
@@ -48,7 +67,7 @@ pub struct ContainerEngine {
 
 impl ContainerEngine {
     /// The engine to use: the one named, or for `auto` the first of Podman, Docker, Finch and
-    /// nerdctl on PATH.
+    /// nerdctl on PATH. When `auto`, prefers an engine whose service is currently answering.
     pub fn detect(preference: &str) -> Result<Self> {
         let candidates: Vec<ContainerEngineKind> = match preference {
             "auto" | "" => ContainerEngineKind::ALL.to_vec(),
@@ -60,10 +79,21 @@ impl ContainerEngine {
                 ),
             },
         };
+        let mut installed = Vec::new();
         for kind in candidates {
             if let Some(path) = find_executable(kind.name()) {
-                return Ok(Self { kind, path });
+                let engine = Self { kind, path };
+                if preference != "auto" && !preference.is_empty() {
+                    return Ok(engine);
+                }
+                if engine.check_service_available() {
+                    return Ok(engine);
+                }
+                installed.push(engine);
             }
+        }
+        if let Some(engine) = installed.into_iter().next() {
+            return Ok(engine);
         }
         bail!("no container engine on PATH (podman, docker, finch or nerdctl)")
     }
@@ -76,11 +106,8 @@ impl ContainerEngine {
         Command::new(&self.path)
     }
 
-    /// Whether the engine answers. Podman has no daemon to be down.
+    /// Whether the engine answers.
     pub fn check_service_available(&self) -> bool {
-        if self.is_podman() {
-            return true;
-        }
         self.command()
             .arg("version")
             .stdout(Stdio::null())
@@ -404,9 +431,23 @@ impl ImageRequest {
             ));
             bail!(msg);
         }
+        // On non-Linux hosts (Windows, macOS), the host cannot mount its own Linux Rust
+        // toolchain into the container. Prefer cross-rs images when available because they
+        // contain pre-installed Linux rustc and cargo.
+        #[cfg(not(target_os = "linux"))]
+        let (primary, secondary) = if fallback.is_some()
+            && config.build.image_repository == crate::targets::DEFAULT_IMAGE_REPOSITORY
+        {
+            (fallback, default)
+        } else {
+            (default, fallback)
+        };
+        #[cfg(target_os = "linux")]
+        let (primary, secondary) = (default, fallback);
+
         Ok(Self::Default {
-            image: default,
-            fallback,
+            image: primary,
+            fallback: secondary,
         })
     }
 
@@ -449,6 +490,9 @@ impl ImageRequest {
                     match ensure(image) {
                         Ok(env) => return Ok((image.clone(), env)),
                         Err(e) if fallback.is_some() => {
+                            if !engine.check_service_available() {
+                                return Err(e);
+                            }
                             ui::warn(format!("{image} is not available ({})", reason(&e)));
                             ui::hint("using cross-rs' image for this target instead");
                         }
@@ -459,6 +503,31 @@ impl ImageRequest {
                 Ok((fallback.clone(), ensure(fallback)?))
             }
         }
+    }
+}
+
+/// Translate a host path to its path inside the container.
+///
+/// On Windows, the workspace root is mounted to `/project`, so paths within `root` are translated
+/// to `/project/...` with forward slashes. On Unix, host paths are mounted at their own paths.
+pub fn to_container_path(host_path: &Path, root: &Path) -> PathBuf {
+    #[cfg(windows)]
+    {
+        if let Ok(rel) = host_path.strip_prefix(root) {
+            let s = rel.to_string_lossy().replace('\\', "/");
+            if s.is_empty() {
+                PathBuf::from("/project")
+            } else {
+                PathBuf::from(format!("/project/{}", s.trim_start_matches('/')))
+            }
+        } else {
+            PathBuf::from("/project")
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = root;
+        host_path.to_path_buf()
     }
 }
 
@@ -486,64 +555,146 @@ impl ContainerSpec {
     pub fn new(
         target: &TargetInfo,
         config: &Config,
-        builder: &Builder,
+        _builder: &Builder,
         root: &Path,
         cwd: &Path,
         run_dir: Option<&Path>,
     ) -> Result<Self> {
         let mut mounts = Vec::new();
         let mut env = Vec::new();
+        #[allow(unused_mut)]
         let mut tools = Vec::new();
-        let same = |p: &Path, ro: bool| Mount {
-            host: p.to_path_buf(),
-            container: p.to_path_buf(),
-            read_only: ro,
-        };
 
-        mounts.push(same(root, false));
-        for dep in crate::workspace::external_path_dependencies(root, cwd) {
-            mounts.push(same(&dep, false));
-        }
-        if let Some(cargo) = crate::workspace::cargo_home() {
-            mounts.push(same(&cargo, false));
-            env.push(("CARGO_HOME".into(), cargo.display().to_string()));
-        }
-        if let Some(rustup) = crate::workspace::rustup_home() {
-            mounts.push(same(&rustup, false));
-            env.push(("RUSTUP_HOME".into(), rustup.display().to_string()));
-        }
-        if let Some(dir) = std::env::var_os("CARGO_TARGET_DIR").map(PathBuf::from)
-            && dir.is_absolute()
-            && !dir.starts_with(root)
+        #[cfg(not(windows))]
         {
-            std::fs::create_dir_all(&dir).ok();
-            mounts.push(same(&dir, false));
-        }
+            let same = |p: &Path, ro: bool| Mount {
+                host: p.to_path_buf(),
+                container: p.to_path_buf(),
+                read_only: ro,
+            };
 
-        let tool = |host: &Path, name: &str, mounts: &mut Vec<Mount>| {
-            mounts.push(Mount {
-                host: host.to_path_buf(),
-                container: Path::new(TOOLS_DIR).join(name),
-                read_only: true,
-            });
-        };
-        let exe = std::env::current_exe().context("cannot find hyprcross' own executable")?;
-        tool(&exe, "hyprcross", &mut mounts);
-        tool(&exe, "hyprlnk", &mut mounts);
-        tools.push(identity(&exe));
-
-        if builder.kind == BuilderKind::Rune {
-            tool(&builder.path, "rune", &mut mounts);
-            tools.push(identity(&builder.path));
-            let rune_home = std::env::var_os("RUNE_HOME")
-                .map(PathBuf::from)
-                .or_else(|| crate::config::dirs_home().map(|h| h.join(".rune")));
-            if let Some(home) = rune_home {
-                std::fs::create_dir_all(&home).ok();
-                mounts.push(same(&home, false));
-                env.push(("RUNE_HOME".into(), home.display().to_string()));
+            mounts.push(same(root, false));
+            for dep in crate::workspace::external_path_dependencies(root, cwd) {
+                mounts.push(same(&dep, false));
+            }
+            if let Some(cargo) = crate::workspace::cargo_home() {
+                mounts.push(same(&cargo, false));
+                env.push(("CARGO_HOME".into(), cargo.display().to_string()));
+            }
+            #[cfg(target_os = "linux")]
+            if let Some(rustup) = crate::workspace::rustup_home() {
+                mounts.push(same(&rustup, false));
+                env.push(("RUSTUP_HOME".into(), rustup.display().to_string()));
+            }
+            if let Some(dir) = std::env::var_os("CARGO_TARGET_DIR").map(PathBuf::from)
+                && dir.is_absolute()
+                && !dir.starts_with(root)
+            {
+                std::fs::create_dir_all(&dir).ok();
+                mounts.push(same(&dir, false));
             }
         }
+
+        #[cfg(windows)]
+        {
+            // Mount workspace root to /project
+            mounts.push(Mount {
+                host: root.to_path_buf(),
+                container: PathBuf::from("/project"),
+                read_only: false,
+            });
+
+            // External path dependencies outside root
+            for (i, dep) in crate::workspace::external_path_dependencies(root, cwd)
+                .into_iter()
+                .enumerate()
+            {
+                let container_dep = if let Ok(rel) = dep.strip_prefix(root.parent().unwrap_or(root)) {
+                    let s = rel.to_string_lossy().replace('\\', "/");
+                    PathBuf::from(format!("/{s}"))
+                } else {
+                    PathBuf::from(format!("/dependencies/{i}"))
+                };
+                mounts.push(Mount {
+                    host: dep,
+                    container: container_dep,
+                    read_only: false,
+                });
+            }
+
+            // Share Cargo cache (crates.io registry & git checkouts)
+            if let Some(cargo) = crate::workspace::cargo_home() {
+                mounts.push(Mount {
+                    host: cargo,
+                    container: PathBuf::from("/cargo"),
+                    read_only: false,
+                });
+                env.push(("CARGO_HOME".into(), "/cargo".into()));
+            }
+
+            // Share Rune cache
+            if let Some(rune) = std::env::var_os("RUNE_HOME")
+                .map(PathBuf::from)
+                .or_else(|| crate::config::dirs_home().map(|h| h.join(".rune")))
+            {
+                std::fs::create_dir_all(&rune).ok();
+                mounts.push(Mount {
+                    host: rune,
+                    container: PathBuf::from("/rune"),
+                    read_only: false,
+                });
+                env.push(("RUNE_HOME".into(), "/rune".into()));
+            }
+
+            if let Some(dir) = std::env::var_os("CARGO_TARGET_DIR").map(PathBuf::from)
+                && dir.is_absolute()
+                && !dir.starts_with(root)
+            {
+                std::fs::create_dir_all(&dir).ok();
+                mounts.push(Mount {
+                    host: dir,
+                    container: PathBuf::from("/target"),
+                    read_only: false,
+                });
+                env.push(("CARGO_TARGET_DIR".into(), "/target".into()));
+            }
+        }
+
+        // Host binaries (hyprcross, hyprlnk, rune) are only mounted on Linux, where host
+        // binaries match the container's Linux ELF format. On Windows and macOS, host executables
+        // are PE/Mach-O and cannot be run by Linux containers.
+        #[cfg(target_os = "linux")]
+        {
+            let tool = |host: &Path, name: &str, mounts: &mut Vec<Mount>| {
+                mounts.push(Mount {
+                    host: host.to_path_buf(),
+                    container: Path::new(TOOLS_DIR).join(name),
+                    read_only: true,
+                });
+            };
+            let exe = std::env::current_exe().context("cannot find hyprcross' own executable")?;
+            tool(&exe, "hyprcross", &mut mounts);
+            tool(&exe, "hyprlnk", &mut mounts);
+            tools.push(identity(&exe));
+
+            if builder.kind == BuilderKind::Rune {
+                tool(&builder.path, "rune", &mut mounts);
+                tools.push(identity(&builder.path));
+                let rune_home = std::env::var_os("RUNE_HOME")
+                    .map(PathBuf::from)
+                    .or_else(|| crate::config::dirs_home().map(|h| h.join(".rune")));
+                if let Some(home) = rune_home {
+                    std::fs::create_dir_all(&home).ok();
+                    mounts.push(Mount {
+                        host: home.clone(),
+                        container: home,
+                        read_only: false,
+                    });
+                    env.push(("RUNE_HOME".into(), home.display().to_string()));
+                }
+            }
+        }
+
         if let Some(dir) = run_dir {
             mounts.push(Mount {
                 host: dir.to_path_buf(),
@@ -563,8 +714,13 @@ impl ContainerSpec {
         for name in names {
             if let Some(value) = std::env::var_os(name) {
                 let path = PathBuf::from(&value);
-                mounts.push(same(&path, false));
-                env.push((name.clone(), path.display().to_string()));
+                let container_path = to_container_path(&path, root);
+                mounts.push(Mount {
+                    host: path,
+                    container: container_path.clone(),
+                    read_only: false,
+                });
+                env.push((name.clone(), container_path.display().to_string()));
             }
         }
         if let Some(tc) = tc {
@@ -576,7 +732,7 @@ impl ContainerSpec {
             mounts,
             volumes,
             env,
-            workdir: root.to_path_buf(),
+            workdir: to_container_path(cwd, root),
             tools,
         })
     }
@@ -596,8 +752,8 @@ impl ContainerSpec {
                 args.push(format!("{uid}:{gid}").into());
             }
         }
-        // Podman on SELinux systems needs mounts relabelled to be readable.
-        let relabel = if engine.is_podman() { ",z" } else { "" };
+        // Podman on Linux SELinux systems needs mounts relabelled to be readable.
+        let relabel = if engine.is_podman() && cfg!(target_os = "linux") { ",z" } else { "" };
         for m in &self.mounts {
             let mode = if m.read_only { "ro" } else { "rw" };
             let mut v = OsString::from(&m.host);
@@ -644,6 +800,7 @@ impl ContainerSpec {
     }
 }
 
+#[allow(dead_code)]
 fn identity(path: &Path) -> (PathBuf, u64, u64) {
     let meta = std::fs::metadata(path).ok();
     let size = meta.as_ref().map_or(0, |m| m.len());
@@ -703,14 +860,25 @@ pub fn command_env(
         env.push(("CLICOLOR_FORCE".into(), "1".into()));
         env.push(("CARGO_TERM_COLOR".into(), "always".into()));
     }
-    if builder.kind == BuilderKind::Cargo && hyprlnk && target.hyprlnk_supported {
-        let key = crate::direct::target_env_key(&target.triple);
-        env.push((
-            format!("CARGO_TARGET_{key}_LINKER"),
-            format!("{TOOLS_DIR}/hyprlnk"),
-        ));
-        if let Some(cc) = target.target_c_compiler() {
-            env.push((crate::hyprlnk_driver::CC_ENV.into(), cc.into()));
+    if builder.kind == BuilderKind::Cargo {
+        #[cfg(target_os = "linux")]
+        if hyprlnk && target.hyprlnk_supported {
+            let key = crate::direct::target_env_key(&target.triple);
+            env.push((
+                format!("CARGO_TARGET_{key}_LINKER"),
+                format!("{TOOLS_DIR}/hyprlnk"),
+            ));
+            if let Some(cc) = target.target_c_compiler() {
+                env.push((crate::hyprlnk_driver::CC_ENV.into(), cc.into()));
+            }
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            let _ = hyprlnk;
+            if let Some(cc) = target.target_c_compiler() {
+                let key = crate::direct::target_env_key(&target.triple);
+                env.push((format!("CARGO_TARGET_{key}_LINKER"), cc.into()));
+            }
         }
     }
     for (k, v) in config
@@ -793,7 +961,7 @@ impl<'a> ContainerRunner<'a> {
             .find(|(k, _)| k == "PATH")
             .map(|(_, v)| v.as_str());
         cmd.args(spec.run_args(self.engine, image_path));
-        cmd.arg("-w").arg(&cwd);
+        cmd.arg("-w").arg(&spec.workdir);
         for (k, v) in command_env(
             self.target,
             self.config,
@@ -846,22 +1014,34 @@ mod tests {
             Some(Path::new("/run/user/1/hyprcross/x")),
         )
         .unwrap();
-        assert!(spec.mounts.contains(&Mount {
-            host: dir.path().into(),
-            container: dir.path().into(),
-            read_only: false,
-        }));
-        let hyprlnk = spec
-            .mounts
-            .iter()
-            .find(|m| m.container == Path::new(TOOLS_DIR).join("hyprlnk"))
-            .unwrap();
-        assert!(hyprlnk.read_only);
-        assert!(
-            spec.mounts
+        #[cfg(target_os = "linux")]
+        {
+            assert!(spec.mounts.contains(&Mount {
+                host: dir.path().into(),
+                container: dir.path().into(),
+                read_only: false,
+            }));
+            let hyprlnk = spec
+                .mounts
                 .iter()
-                .any(|m| m.container == Path::new(RUN_DIR))
-        );
+                .find(|m| m.container == Path::new(TOOLS_DIR).join("hyprlnk"))
+                .unwrap();
+            assert!(hyprlnk.read_only);
+            assert!(
+                spec.mounts
+                    .iter()
+                    .any(|m| m.container == Path::new(RUN_DIR))
+            );
+        }
+        #[cfg(windows)]
+        {
+            assert!(spec.mounts.contains(&Mount {
+                host: dir.path().into(),
+                container: PathBuf::from("/project"),
+                read_only: false,
+            }));
+            assert_eq!(spec.workdir, Path::new("/project"));
+        }
 
         let engine = ContainerEngine {
             kind: ContainerEngineKind::Docker,
@@ -889,11 +1069,21 @@ mod tests {
             path: "cargo".into(),
         };
         let env = command_env(&target, &config, &cargo, true, false);
-        assert!(env.contains(&(
-            "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER".into(),
-            format!("{TOOLS_DIR}/hyprlnk")
-        )));
-        assert!(env.contains(&("HYPRLNK_CC".into(), "aarch64-linux-gnu-gcc".into())));
+        #[cfg(target_os = "linux")]
+        {
+            assert!(env.contains(&(
+                "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER".into(),
+                format!("{TOOLS_DIR}/hyprlnk")
+            )));
+            assert!(env.contains(&("HYPRLNK_CC".into(), "aarch64-linux-gnu-gcc".into())));
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            assert!(env.contains(&(
+                "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER".into(),
+                "aarch64-linux-gnu-gcc".into()
+            )));
+        }
 
         let rune = Builder {
             kind: BuilderKind::Rune,
@@ -904,5 +1094,23 @@ mod tests {
             !env.iter()
                 .any(|(k, _)| k.ends_with("_LINKER") || k == "HYPRLNK_CC")
         );
+    }
+
+    #[test]
+    fn test_to_container_path() {
+        #[cfg(windows)]
+        {
+            let root = Path::new(r"C:\workspace\project");
+            assert_eq!(to_container_path(root, root), Path::new("/project"));
+            assert_eq!(
+                to_container_path(&root.join("src").join("lib"), root),
+                Path::new("/project/src/lib")
+            );
+        }
+        #[cfg(not(windows))]
+        {
+            let root = Path::new("/workspace/project");
+            assert_eq!(to_container_path(root, root), root);
+        }
     }
 }

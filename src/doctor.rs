@@ -166,7 +166,7 @@ pub fn run_doctor() {
         }
         r.problem(
             format!("{} is installed but not answering", kind.name()),
-            "start its service (`sudo systemctl start docker`) or add yourself to its group",
+            kind.service_hint(),
         );
     }
     if engine_ok.is_none() && !crate::engine::any_container_engine() {

@@ -5,29 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [2027.0.0-rc.1] - 2026-10-18
+## [v2027.0.0-rc.2] - 2026-10-18
 
 ### Added
-- **Native macOS Cross-Compilation**: Zero-Docker cross-compilation pipeline on Linux and
-  Windows hosts for `aarch64-apple-darwin` and `x86_64-apple-darwin`. Automatically fetches,
-  verifies, and caches minimal macOS SDK stubs (`MacOSX26.1.sdk` from `joseluisq/macosx-sdks`)
-  into `~/.local/share/hyprcross/sdks/MacOSX.sdk` (Linux) or `%LOCALAPPDATA%\hyprcross\sdks\MacOSX.sdk`
-  (Windows), overridable with `HYPRCROSS_MACOS_SDK_PATH` or `SDKROOT`. Links Mach-O binaries
-  directly via `hyprlnk` with `-C linker-flavor=ld64.lld` and `-isysroot`.
-- **Searchable `targets` Command**: `hyprcross targets [query]` supports searching by natural
-  keywords (e.g. `hyprcross targets "windows arm"`, `hyprcross targets macos`, `hyprcross targets musl`).
-  Lists all supported targets, standard library installation status, build engine, and test runners.
-- **Crates.io Publishing & `cargo-hyprcross` Crate**: Added standalone `cargo-hyprcross` crate
-  in `crates/cargo-hyprcross` to support `cargo install cargo-hyprcross` directly from crates.io.
-- **Pre-Release Workflow**: Release workflow automatically differentiates `-rc.x` pre-releases
-  from stable releases, tagging GitHub Releases as beta / pre-release and publishing to crates.io.
+- **POSIX Path Translation on Windows**: On Windows hosts, the project workspace root is mounted to `/project` inside build containers, with subdirectories and working directories translated from Windows backslash paths to standard forward-slash POSIX paths. External path dependencies and caches (`CARGO_HOME` -> `/cargo`, `RUNE_HOME` -> `/rune`, `CARGO_TARGET_DIR` -> `/target`) are mapped cleanly without invalid Windows drive letter syntax in container volume specifications.
+- **Standalone Linux Toolchain Support**: Non-Linux hosts (Windows and macOS) automatically prefer `cross-rs` container images that contain self-contained Linux `rustc` and `cargo` toolchains pre-installed, avoiding errors caused by attempting to mount or run host-native PE (`.exe`) or Mach-O binaries in Linux containers.
+- **Docker Image Rust Toolchain**: Updated the common container build script (`docker/scripts/common.sh`) to bundle a standalone Rust toolchain directly in container image builds, enabling self-contained compilation on non-Linux hosts without relying on host toolchain mounts.
+- **OS-Aware Service Diagnostics**: Added platform-tailored service recovery instructions to `ContainerEngineKind::service_hint()`, giving actionable advice for Windows/macOS (`podman machine start` or starting Docker Desktop) and Linux (`sudo systemctl start docker` or `podman.socket`).
 
 ### Changed
-- **Cleaner Image Pull UI**: Replaced raw, noisy container engine logs during `podman pull` and
-  `docker pull` with custom hyprcross progress bars and layer download phase indicators.
-- **Smarter Auto Engine**: `engine = "auto"` automatically chooses direct host execution for
-  host targets, macOS targets, targets without C dependencies (Wasm, bare metal), and targets
-  with local cross-compilers installed, using container images only when needed.
+- **Engine Auto-Detection Priority**: `ContainerEngine::detect("auto")` now checks engine availability and prioritizes an installed container engine that is actively responding over dead or uninitialized services.
+- **Non-Linux Container Builder**: On Windows and macOS, container builds drive the image's internal Linux `cargo` toolchain, ensuring Cargo links with the container's cross C compiler instead of attempting to run host-native `rune` or `hyprlnk` executables.
+- **Skip Host Target std Installation**: Container builds on Windows and macOS no longer attempt to run `rustup target add` on the host, since builds execute inside self-contained Linux container images.
+
+### Fixed
+- **Podman Dead Network Socket Crash**: Fixed a bug where `check_service_available()` hardcoded `return true` for Podman under the assumption that Podman is always daemonless. On Windows and macOS, Podman relies on a virtual machine (`podman-machine`), and an unstarted VM caused WSAENETDOWN socket errors (`dial unix /run/podman/podman.sock: connect: A socket operation encountered a dead network.`) and false positive green checkmarks in `hyprcross doctor`.
+- **Misleading Registry Fallback on Connection Errors**: `ImageRequest::resolve` no longer misinterprets container engine connection failures as missing registry images.
+- **Working Directory in Container Runner & Daemon**: Fixed container working directory propagation (`-w`) in `ContainerRunner` and `daemon.exec` so that translated container paths (`/project/...`) are passed instead of raw host paths.
+- **SELinux Relabeling**: Restricted Podman `,z` volume relabeling to Linux hosts where SELinux actually applies.
 
 ## [0.2.0] - 2026-10-15
 

@@ -34,3 +34,10 @@ apt_install \
 # tools that want a writable HOME find one.
 mkdir -p /home/hyprcross
 chmod 1777 /home/hyprcross
+
+# Bundle a standalone Rust toolchain so containers can run on Windows and macOS hosts
+# without needing to mount host-native toolchains.
+export RUSTUP_HOME=/usr/local/rustup
+export CARGO_HOME=/usr/local/cargo
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile minimal --no-modify-path
+chmod -R a+w /usr/local/cargo /usr/local/rustup

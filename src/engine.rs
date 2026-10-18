@@ -146,36 +146,62 @@ impl ExecutionContext {
         hyprlnk: bool,
     ) -> Result<i32> {
         let engine = ContainerEngine::detect(&self.config.build.container_engine)?;
+        if !engine.check_service_available() {
+            bail!(
+                "{} is installed but not answering: {}",
+                engine.kind.name(),
+                engine.kind.service_hint()
+            );
+        }
         let cwd = std::env::current_dir()?;
-        if subcommand != "clean" {
+        if subcommand != "clean" && cfg!(target_os = "linux") {
             crate::workspace::ensure_rustup_target(&cwd, &self.target.triple)?;
         }
-        let mut args = self.builder.args(subcommand, &self.target.triple, hyprlnk);
-        args.extend(extra_args.iter().cloned());
+        let (program, args) = if cfg!(target_os = "linux") {
+            let mut a = self.builder.args(subcommand, &self.target.triple, hyprlnk);
+            a.extend(extra_args.iter().cloned());
+            (self.builder.kind.name().to_string(), a)
+        } else {
+            let cargo_builder = Builder {
+                kind: crate::builder::BuilderKind::Cargo,
+                path: "cargo".into(),
+            };
+            let mut a = cargo_builder.args(subcommand, &self.target.triple, false);
+            a.extend(extra_args.iter().cloned());
+            ("cargo".to_string(), a)
+        };
         // Programs and tests may read their input; builds never do.
         let stdin = matches!(subcommand, "run" | "test" | "bench");
-        let program = self.builder.kind.name();
+
+        let container_builder = if cfg!(target_os = "linux") {
+            self.builder.clone()
+        } else {
+            Builder {
+                kind: crate::builder::BuilderKind::Cargo,
+                path: "cargo".into(),
+            }
+        };
 
         let use_daemon = self.daemon_override.unwrap_or(self.config.build.daemon);
         if use_daemon && engine.check_service_available() {
-            let daemon = ContainerDaemon::new(&engine, &self.target, &self.config, &self.builder)?;
+            let daemon = ContainerDaemon::new(&engine, &self.target, &self.config, &container_builder)?;
             let env = command_env(
                 &self.target,
                 &self.config,
-                &self.builder,
+                &container_builder,
                 hyprlnk,
                 on_terminal(),
             );
             daemon.execute(Job {
-                program,
+                program: &program,
                 args: &args,
                 env,
                 cwd: &cwd,
                 stdin,
             })
         } else {
-            ContainerRunner::new(&engine, &self.target, &self.config, &self.builder, hyprlnk)
-                .execute(program, &args, stdin)
+            ContainerRunner::new(&engine, &self.target, &self.config, &container_builder, hyprlnk)
+                .execute(&program, &args, stdin)
         }
     }
 
