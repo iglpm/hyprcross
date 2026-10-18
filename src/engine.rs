@@ -184,7 +184,8 @@ impl ExecutionContext {
 
         let use_daemon = self.daemon_override.unwrap_or(self.config.build.daemon);
         if use_daemon && engine.check_service_available() {
-            let daemon = ContainerDaemon::new(&engine, &self.target, &self.config, &container_builder)?;
+            let daemon =
+                ContainerDaemon::new(&engine, &self.target, &self.config, &container_builder)?;
             let env = command_env(
                 &self.target,
                 &self.config,
@@ -200,8 +201,14 @@ impl ExecutionContext {
                 stdin,
             })
         } else {
-            ContainerRunner::new(&engine, &self.target, &self.config, &container_builder, hyprlnk)
-                .execute(&program, &args, stdin)
+            ContainerRunner::new(
+                &engine,
+                &self.target,
+                &self.config,
+                &container_builder,
+                hyprlnk,
+            )
+            .execute(&program, &args, stdin)
         }
     }
 

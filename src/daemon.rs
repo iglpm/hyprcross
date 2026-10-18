@@ -248,9 +248,7 @@ impl<'a> ContainerDaemon<'a> {
         } else {
             job.program
         };
-        cmd.arg(self.container_name())
-            .arg(program)
-            .args(job.args);
+        cmd.arg(self.container_name()).arg(program).args(job.args);
         if !job.stdin {
             cmd.stdin(Stdio::null());
         }

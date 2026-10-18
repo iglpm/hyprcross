@@ -611,7 +611,8 @@ impl ContainerSpec {
                 .into_iter()
                 .enumerate()
             {
-                let container_dep = if let Ok(rel) = dep.strip_prefix(root.parent().unwrap_or(root)) {
+                let container_dep = if let Ok(rel) = dep.strip_prefix(root.parent().unwrap_or(root))
+                {
                     let s = rel.to_string_lossy().replace('\\', "/");
                     PathBuf::from(format!("/{s}"))
                 } else {
@@ -755,7 +756,11 @@ impl ContainerSpec {
             }
         }
         // Podman on Linux SELinux systems needs mounts relabelled to be readable.
-        let relabel = if engine.is_podman() && cfg!(target_os = "linux") { ",z" } else { "" };
+        let relabel = if engine.is_podman() && cfg!(target_os = "linux") {
+            ",z"
+        } else {
+            ""
+        };
         for m in &self.mounts {
             let mode = if m.read_only { "ro" } else { "rw" };
             let mut v = OsString::from(&m.host);
