@@ -555,7 +555,7 @@ impl ContainerSpec {
     pub fn new(
         target: &TargetInfo,
         config: &Config,
-        _builder: &Builder,
+        builder: &Builder,
         root: &Path,
         cwd: &Path,
         run_dir: Option<&Path>,
@@ -564,6 +564,8 @@ impl ContainerSpec {
         let mut env = Vec::new();
         #[allow(unused_mut)]
         let mut tools = Vec::new();
+        #[cfg(not(target_os = "linux"))]
+        let _ = builder;
 
         #[cfg(not(windows))]
         {
