@@ -97,7 +97,7 @@ jobs:
         env:
           RUSTFLAGS: "-D warnings"
         run: |
-          cargo build --release --locked -p hyprcross -p cargo-hyprcross
+          cargo build --release --locked -p hyprcross -p cargo-hyprcross || (cargo clean && cargo build --release --locked -p hyprcross -p cargo-hyprcross)
           echo "$PWD/target/release" >> $GITHUB_PATH
 
       - name: Cross-compile target with hyprcross
