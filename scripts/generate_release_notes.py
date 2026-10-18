@@ -67,7 +67,7 @@ def main():
         download_url = f"{base_url}/{filename}"
         sha_url = f"{download_url}.sha256"
         table_rows.append(
-            f"| **{platform}** | `{triple}` | [⬇️ **Download {filename}**]({download_url}) | [SHA-256]({sha_url}) | {desc} |"
+            f"| **{platform}** | `{triple}` | [**Download {filename}**]({download_url}) | [SHA-256]({sha_url}) | {desc} |"
         )
 
     table_markdown = "\n".join(table_rows)
@@ -79,7 +79,7 @@ def main():
 
 ---
 
-## 🚀 How to Upgrade & Install hyprcross
+## How to Upgrade & Install hyprcross
 
 ### Option 1: Upgrade via Cargo (Recommended for Rust Developers)
 
@@ -103,7 +103,7 @@ cargo hyprcross --version
 
 Download and extract the ready-to-run binary package for your operating system and architecture directly:
 
-#### 🐧 Linux & 🍎 macOS (Shell)
+#### Linux & macOS (Shell)
 ```bash
 # 1. Download and extract the archive for your architecture (example: Linux x86_64):
 curl -fsSL "{base_url}/hyprcross-x86_64-unknown-linux-gnu.tar.gz" | tar -xz
@@ -116,7 +116,7 @@ hyprcross --version
 cargo hyprcross --version
 ```
 
-#### 🪟 Windows (PowerShell)
+#### Windows (PowerShell)
 ```powershell
 # 1. Download the archive for 64-bit Windows:
 Invoke-WebRequest -Uri "{base_url}/hyprcross-x86_64-pc-windows-gnu.zip" -OutFile "hyprcross.zip"
@@ -130,7 +130,7 @@ hyprcross --version
 
 ---
 
-## 📦 Download Binaries
+## Download Binaries
 
 Click any link in the **Direct Download** column to immediately download the pre-compiled archive. Each package contains standalone `hyprcross` and `cargo-hyprcross` binaries.
 
