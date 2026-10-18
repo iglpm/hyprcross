@@ -88,6 +88,34 @@ impl<'a> DirectEngine<'a> {
         let macos_sdk = if self.target.os == crate::targets::TargetOs::MacOS {
             let sdk = crate::macos::ensure_macos_sdk()?;
             cmd.env("SDKROOT", &sdk);
+
+            // On non-macOS hosts (e.g. Linux), cc-rs cross-compiling for Apple targets defaults to
+            // the host `cc` (typically GCC), which does not recognize Apple flags (-arch, -mmacosx-version-min).
+            // Direct clang to cross-compile for the target triple with the macOS SDK.
+            let triple_underscore = triple.replace(['-', '.'], "_");
+            if let Some(clang) = find_executable("clang") {
+                let clang_path = clang.display().to_string();
+                let cflags = format!("--target={triple} -isysroot {}", sdk.display());
+
+                cmd.env(format!("CC_{triple}"), &clang_path);
+                cmd.env(format!("CC_{triple_underscore}"), &clang_path);
+                cmd.env(format!("CFLAGS_{triple}"), &cflags);
+                cmd.env(format!("CFLAGS_{triple_underscore}"), &cflags);
+
+                if let Some(clang_cpp) = find_executable("clang++") {
+                    let cpp_path = clang_cpp.display().to_string();
+                    cmd.env(format!("CXX_{triple}"), &cpp_path);
+                    cmd.env(format!("CXX_{triple_underscore}"), &cpp_path);
+                    cmd.env(format!("CXXFLAGS_{triple}"), &cflags);
+                    cmd.env(format!("CXXFLAGS_{triple_underscore}"), &cflags);
+                }
+            }
+            if let Some(ar) = find_executable("llvm-ar").or_else(|| find_executable("ar")) {
+                let ar_path = ar.display().to_string();
+                cmd.env(format!("AR_{triple}"), &ar_path);
+                cmd.env(format!("AR_{triple_underscore}"), &ar_path);
+            }
+
             Some(sdk)
         } else {
             None

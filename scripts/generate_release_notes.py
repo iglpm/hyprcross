@@ -57,9 +57,8 @@ def main():
         ("Linux ARM64 (musl static)", "aarch64", "aarch64-unknown-linux-musl", "tar.gz", "Statically linked 64-bit ARM Linux (Alpine ARM64)"),
         ("macOS Apple Silicon", "Apple Silicon (M1–M4)", "aarch64-apple-darwin", "tar.gz", "Apple Silicon Macs (arm64) running macOS 11+"),
         ("macOS Intel", "x86_64", "x86_64-apple-darwin", "tar.gz", "Intel-based Macs (x86_64) running macOS 10.12+"),
-        ("Windows (MSVC)", "x86_64", "x86_64-pc-windows-msvc", "zip", "64-bit Windows (MSVC native ABI)"),
-        ("Windows ARM64 (MSVC)", "aarch64", "aarch64-pc-windows-msvc", "zip", "Windows 11 on ARM (Snapdragon X Elite, Surface Pro ARM)"),
-        ("Windows (MinGW/GNU)", "x86_64", "x86_64-pc-windows-gnu", "zip", "64-bit Windows (GNU / MinGW-w64 toolchain)"),
+        ("Windows (64-bit)", "x86_64", "x86_64-pc-windows-gnu", "zip", "64-bit Windows standalone executable (Windows 10/11, Server)"),
+        ("Windows (32-bit)", "x86", "i686-pc-windows-gnu", "zip", "32-bit Windows standalone executable (x86)"),
     ]
 
     table_rows = []
@@ -120,7 +119,7 @@ cargo hyprcross --version
 #### 🪟 Windows (PowerShell)
 ```powershell
 # 1. Download the archive for 64-bit Windows:
-Invoke-WebRequest -Uri "{base_url}/hyprcross-x86_64-pc-windows-msvc.zip" -OutFile "hyprcross.zip"
+Invoke-WebRequest -Uri "{base_url}/hyprcross-x86_64-pc-windows-gnu.zip" -OutFile "hyprcross.zip"
 
 # 2. Extract the binaries to your user Cargo bin directory (or any directory in your PATH):
 Expand-Archive -Path "hyprcross.zip" -DestinationPath "$HOME\\.cargo\\bin" -Force

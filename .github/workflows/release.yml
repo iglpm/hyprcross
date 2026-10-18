@@ -32,11 +32,9 @@ jobs:
             archive: tar.gz
           - target: x86_64-apple-darwin
             archive: tar.gz
-          - target: x86_64-pc-windows-msvc
-            archive: zip
-          - target: aarch64-pc-windows-msvc
-            archive: zip
           - target: x86_64-pc-windows-gnu
+            archive: zip
+          - target: i686-pc-windows-gnu
             archive: zip
     steps:
       - name: Configure Git Credentials for Submodules
@@ -61,6 +59,19 @@ jobs:
         run: |
           mkdir -p "${RUNNER_TEMP}/.docker"
           echo "DOCKER_CONFIG=${RUNNER_TEMP}/.docker" >> "$GITHUB_ENV"
+
+          if ! command -v clang >/dev/null 2>&1 || ! command -v llvm-ar >/dev/null 2>&1; then
+            echo "Installing clang and llvm for cross-compilation..."
+            (
+              flock -x 200
+              while sudo fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 || sudo fuser /var/lib/apt/lists/lock >/dev/null 2>&1; do
+                echo "Waiting for concurrent apt-get lock to release..."
+                sleep 2
+              done
+              sudo apt-get update -y || true
+              sudo apt-get install -y clang llvm
+            ) 200>/tmp/runner-apt.lock
+          fi
 
           if command -v docker >/dev/null 2>&1; then
             echo "Found Docker engine: $(docker --version)"
