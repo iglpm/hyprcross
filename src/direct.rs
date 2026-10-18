@@ -85,7 +85,7 @@ impl<'a> DirectEngine<'a> {
             cmd.env(&linker_var, cc);
         }
 
-        let macos_sdk = if self.target.os == crate::targets::TargetOs::MacOS {
+        if self.target.os == crate::targets::TargetOs::MacOS {
             let sdk = crate::macos::ensure_macos_sdk()?;
             cmd.env("SDKROOT", &sdk);
 
@@ -115,11 +115,7 @@ impl<'a> DirectEngine<'a> {
                 cmd.env(format!("AR_{triple}"), &ar_path);
                 cmd.env(format!("AR_{triple_underscore}"), &ar_path);
             }
-
-            Some(sdk)
-        } else {
-            None
-        };
+        }
 
         if hyprlnk && self.builder.kind == BuilderKind::Cargo {
             match hyprlnk_driver::linker_for_cargo() {
@@ -139,12 +135,6 @@ impl<'a> DirectEngine<'a> {
             let mut rustc_flags = Vec::new();
             if let Some(flavor) = hyprlnk_driver::rustc_linker_flavor(triple) {
                 rustc_flags.push(format!("-C linker-flavor={flavor}"));
-            }
-            if let Some(sdk) = &macos_sdk {
-                rustc_flags.push(format!(
-                    "-C link-arg=-isysroot -C link-arg={}",
-                    sdk.display()
-                ));
             }
             if !rustc_flags.is_empty() {
                 let flag = rustc_flags.join(" ");
