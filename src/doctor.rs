@@ -172,9 +172,7 @@ pub fn run_doctor() {
             let v = version_of(&engine.path)
                 .map(|v| v.replace(" version ", " ").replace(',', ""))
                 .unwrap_or_else(|| kind.name().into());
-            r.ok(format!(
-                "{v} runs optional custom container images"
-            ));
+            r.ok(format!("{v} runs optional custom container images"));
             engine_ok = Some(engine);
             break;
         }

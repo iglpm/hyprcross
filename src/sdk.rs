@@ -435,21 +435,21 @@ pub fn sdk_urls(triple: &str, def: Option<&TargetSdkDef>) -> (String, String) {
     if let Ok(url) = std::env::var(format!(
         "HYPRCROSS_SDK_URL_{}",
         triple.replace(['-', '.'], "_").to_uppercase()
-    )) && !url.trim().is_empty() {
+    )) && !url.trim().is_empty()
+    {
         return (url.trim().to_string(), url.trim().to_string());
     }
 
-    let repo = std::env::var("HYPRCROSS_SDK_REPO")
-        .unwrap_or_else(|_| DEFAULT_SDK_REPO.to_string());
+    let repo = std::env::var("HYPRCROSS_SDK_REPO").unwrap_or_else(|_| DEFAULT_SDK_REPO.to_string());
     let repo_clean = repo.trim_end_matches('/');
 
     let fallback_repo = FALLBACK_SDK_REPO.trim_end_matches('/');
 
-    if let Some(d) = def {
-        if let Some(primary) = d.primary_url {
-            let fallback = d.fallback_url.unwrap_or(primary);
-            return (primary.to_string(), fallback.to_string());
-        }
+    if let Some(d) = def
+        && let Some(primary) = d.primary_url
+    {
+        let fallback = d.fallback_url.unwrap_or(primary);
+        return (primary.to_string(), fallback.to_string());
     }
 
     let primary = format!("{repo_clean}/{triple}.tar.xz");
@@ -457,11 +457,7 @@ pub fn sdk_urls(triple: &str, def: Option<&TargetSdkDef>) -> (String, String) {
     (primary, fallback)
 }
 
-fn bootstrap_target_sdk(
-    triple: &str,
-    def: Option<&TargetSdkDef>,
-    dest: &Path,
-) -> Result<()> {
+fn bootstrap_target_sdk(triple: &str, def: Option<&TargetSdkDef>, dest: &Path) -> Result<()> {
     let name = def.map_or(triple, |d| d.display_name);
     let size_desc = def.map_or("", |d| d.approx_size);
     let (primary_url, fallback_url) = sdk_urls(triple, def);
@@ -470,15 +466,22 @@ fn bootstrap_target_sdk(
         "fetching",
         format!(
             "SDK for {name}... {}",
-            if size_desc.is_empty() { String::new() } else { format!("[{size_desc}]") }
+            if size_desc.is_empty() {
+                String::new()
+            } else {
+                format!("[{size_desc}]")
+            }
         ),
     );
 
-    let temp_dir = tempfile::tempdir().context("cannot create temporary directory for SDK download")?;
+    let temp_dir =
+        tempfile::tempdir().context("cannot create temporary directory for SDK download")?;
     let tarball_path = temp_dir.path().join("sdk.tar.xz");
 
     let downloaded = download_file(&primary_url, &tarball_path).or_else(|e| {
-        ui::trace(format!("primary SDK download URL failed ({e}), trying fallback..."));
+        ui::trace(format!(
+            "primary SDK download URL failed ({e}), trying fallback..."
+        ));
         download_file(&fallback_url, &tarball_path)
     });
 
@@ -505,7 +508,9 @@ fn bootstrap_target_sdk(
     }
 
     if let Err(e) = fs::rename(&source_sdk, dest) {
-        ui::trace(format!("cannot rename {source_sdk:?} to {dest:?} ({e}); copying instead"));
+        ui::trace(format!(
+            "cannot rename {source_sdk:?} to {dest:?} ({e}); copying instead"
+        ));
         copy_dir_recursive(&source_sdk, dest)?;
     }
 

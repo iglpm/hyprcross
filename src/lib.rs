@@ -112,9 +112,7 @@ fn dispatch(args: Vec<OsString>) -> Result<i32> {
         Some(Commands::Daemon(a)) => {
             daemon_command(a.action.unwrap_or(DaemonAction::Status), config)
         }
-        Some(Commands::Sdk(a)) => {
-            sdk_command(a.action.unwrap_or(cli::SdkAction::List))
-        }
+        Some(Commands::Sdk(a)) => sdk_command(a.action.unwrap_or(cli::SdkAction::List)),
         Some(Commands::Images(a)) => images_command(a.action, config),
         Some(Commands::Agent { .. }) => unreachable!("handled above"),
         None => {

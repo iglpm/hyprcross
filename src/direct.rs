@@ -148,7 +148,10 @@ impl<'a> DirectEngine<'a> {
             }
             if let Some(sdk) = &maybe_sdk {
                 if self.target.os == crate::targets::TargetOs::MacOS {
-                    rustc_flags.push(format!("-C link-arg=-syslibroot -C link-arg={}", sdk.display()));
+                    rustc_flags.push(format!(
+                        "-C link-arg=-syslibroot -C link-arg={}",
+                        sdk.display()
+                    ));
                 } else if self.target.env == crate::targets::TargetEnv::Msvc {
                     let arch = match self.target.arch {
                         crate::targets::TargetArch::X86_64 => "x64",
@@ -158,7 +161,10 @@ impl<'a> DirectEngine<'a> {
                     };
                     rustc_flags.push(format!("-C link-arg=/LIBPATH:{}/lib/{arch}", sdk.display()));
                     rustc_flags.push(format!("-C link-arg=/LIBPATH:{}/um/{arch}", sdk.display()));
-                    rustc_flags.push(format!("-C link-arg=/LIBPATH:{}/ucrt/{arch}", sdk.display()));
+                    rustc_flags.push(format!(
+                        "-C link-arg=/LIBPATH:{}/ucrt/{arch}",
+                        sdk.display()
+                    ));
                 } else if self.target.os == crate::targets::TargetOs::Linux
                     || self.target.os == crate::targets::TargetOs::Android
                     || self.target.os == crate::targets::TargetOs::FreeBsd
