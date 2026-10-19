@@ -79,10 +79,20 @@ impl<'a> DirectEngine<'a> {
         let driver = (!self.target.is_host())
             .then(|| host_c_compiler(self.target))
             .flatten();
-        if std::env::var_os(&linker_var).is_none()
-            && let Some(cc) = &driver
-        {
-            cmd.env(&linker_var, cc);
+        let fallback_clang = (!self.target.is_host()
+            && driver.is_none()
+            && self.target.env != crate::targets::TargetEnv::Msvc
+            && self.target.os != crate::targets::TargetOs::None
+            && self.target.os != crate::targets::TargetOs::Wasi)
+            .then(|| find_executable("clang"))
+            .flatten();
+
+        if std::env::var_os(&linker_var).is_none() {
+            if let Some(cc) = &driver {
+                cmd.env(&linker_var, cc);
+            } else if let Some(clang) = &fallback_clang {
+                cmd.env(&linker_var, clang);
+            }
         }
 
         // Ensure the target SDK is available for linking
@@ -139,46 +149,116 @@ impl<'a> DirectEngine<'a> {
                     }
                 }
             }
-            if let Some(cc) = driver.filter(|c| c != "cc") {
-                cmd.env(hyprlnk_driver::CC_ENV, cc);
-            }
-            let mut rustc_flags = Vec::new();
-            if let Some(flavor) = hyprlnk_driver::rustc_linker_flavor(triple) {
-                rustc_flags.push(format!("-C linker-flavor={flavor}"));
-            }
-            if let Some(sdk) = &maybe_sdk {
-                if self.target.os == crate::targets::TargetOs::MacOS {
-                    rustc_flags.push(format!(
-                        "-C link-arg=-syslibroot -C link-arg={}",
-                        sdk.display()
-                    ));
-                } else if self.target.env == crate::targets::TargetEnv::Msvc {
-                    let arch = match self.target.arch {
-                        crate::targets::TargetArch::X86_64 => "x64",
-                        crate::targets::TargetArch::Aarch64 => "arm64",
-                        crate::targets::TargetArch::X86 => "x86",
-                        _ => "x64",
-                    };
-                    rustc_flags.push(format!("-C link-arg=/LIBPATH:{}/lib/{arch}", sdk.display()));
-                    rustc_flags.push(format!("-C link-arg=/LIBPATH:{}/um/{arch}", sdk.display()));
-                    rustc_flags.push(format!(
-                        "-C link-arg=/LIBPATH:{}/ucrt/{arch}",
-                        sdk.display()
-                    ));
-                } else if self.target.os == crate::targets::TargetOs::Linux
-                    || self.target.os == crate::targets::TargetOs::Android
-                    || self.target.os == crate::targets::TargetOs::FreeBsd
-                {
-                    rustc_flags.push(format!("-C link-arg=--sysroot={}", sdk.display()));
+        }
+        if let Some(cc) = driver.as_ref().filter(|c| c.as_str() != "cc") {
+            cmd.env(hyprlnk_driver::CC_ENV, cc);
+        } else if let Some(clang) = &fallback_clang {
+            cmd.env(hyprlnk_driver::CC_ENV, clang);
+        }
+
+        let mut rustc_flags = Vec::new();
+        if hyprlnk
+            && self.builder.kind == BuilderKind::Cargo
+            && let Some(flavor) = hyprlnk_driver::rustc_linker_flavor(triple)
+        {
+            rustc_flags.push(format!("-C linker-flavor={flavor}"));
+        }
+        if let Some(sdk) = &maybe_sdk {
+            if self.target.os == crate::targets::TargetOs::MacOS {
+                rustc_flags.push(format!(
+                    "-C link-arg=-syslibroot -C link-arg={}",
+                    sdk.display()
+                ));
+            } else if self.target.env == crate::targets::TargetEnv::Msvc {
+                let arch_candidates = match self.target.arch {
+                    crate::targets::TargetArch::X86_64 => &["x86_64", "x64"][..],
+                    crate::targets::TargetArch::Aarch64 => &["aarch64", "arm64"][..],
+                    crate::targets::TargetArch::X86 => &["x86", "i386"][..],
+                    _ => &["x86_64", "x64"][..],
+                };
+
+                let mut lib_dirs = Vec::new();
+                for &arch in arch_candidates {
+                    // xwin splat layout
+                    let p1 = sdk.join("crt").join("lib").join(arch);
+                    let p2 = sdk.join("sdk").join("lib").join("um").join(arch);
+                    let p3 = sdk.join("sdk").join("lib").join("ucrt").join(arch);
+                    // flat / stub layout
+                    let p4 = sdk.join("lib").join(arch);
+                    let p5 = sdk.join("um").join(arch);
+                    let p6 = sdk.join("ucrt").join(arch);
+
+                    for p in [p1, p2, p3, p4, p5, p6] {
+                        if p.is_dir() && !lib_dirs.contains(&p) {
+                            lib_dirs.push(p);
+                        }
+                    }
+                }
+
+                for dir in &lib_dirs {
+                    rustc_flags.push(format!("-C link-arg=/LIBPATH:{}", dir.display()));
+                }
+
+                if !lib_dirs.is_empty() {
+                    let joined = std::env::join_paths(&lib_dirs)
+                        .unwrap_or_default()
+                        .to_string_lossy()
+                        .to_string();
+                    cmd.env("LIB", joined);
+                }
+            } else if self.target.os == crate::targets::TargetOs::Linux
+                || self.target.os == crate::targets::TargetOs::Android
+                || self.target.os == crate::targets::TargetOs::FreeBsd
+            {
+                rustc_flags.push(format!("-C link-arg=--sysroot={}", sdk.display()));
+                let usr_lib = sdk.join("usr").join("lib");
+                if usr_lib.is_dir() {
+                    rustc_flags.push(format!("-C link-arg=-L{}", usr_lib.display()));
+                }
+                let lib_dir = sdk.join("lib");
+                if lib_dir.is_dir() {
+                    rustc_flags.push(format!("-C link-arg=-L{}", lib_dir.display()));
+                }
+                if self.target.os == crate::targets::TargetOs::Android {
+                    let api21 = usr_lib.join("21");
+                    if api21.is_dir() {
+                        rustc_flags.push(format!("-C link-arg=-L{}", api21.display()));
+                    }
+                }
+            } else if self.target.os == crate::targets::TargetOs::Windows {
+                let usr_lib = sdk.join("usr").join("lib");
+                if usr_lib.is_dir() {
+                    rustc_flags.push(format!("-C link-arg=-L{}", usr_lib.display()));
                 }
             }
-            if !rustc_flags.is_empty() {
-                let flag = rustc_flags.join(" ");
-                match std::env::var("RUSTFLAGS") {
-                    Ok(existing) => cmd.env("RUSTFLAGS", format!("{existing} {flag}")),
-                    Err(_) => cmd.env(format!("CARGO_TARGET_{key}_RUSTFLAGS"), flag),
-                };
-            }
+        }
+
+        let clang_target = match triple.as_str() {
+            "x86_64-pc-windows-gnu" => "x86_64-w64-mingw32",
+            "i686-pc-windows-gnu" => "i686-w64-mingw32",
+            "x86_64-pc-windows-gnullvm" => "x86_64-w64-windows-gnu",
+            "aarch64-pc-windows-gnullvm" => "aarch64-w64-windows-gnu",
+            "x86_64-unknown-freebsd" => "x86_64-unknown-freebsd14.0",
+            "riscv64gc-unknown-linux-musl" => "riscv64-unknown-linux-musl",
+            "riscv64gc-unknown-linux-gnu" => "riscv64-unknown-linux-gnu",
+            "powerpc64le-unknown-linux-musl" => "powerpc64le-unknown-linux-musl",
+            "armv7-unknown-linux-musleabihf" => "armv7-linux-musleabihf",
+            "arm-unknown-linux-musleabihf" => "arm-linux-musleabihf",
+            _ => triple.as_str(),
+        };
+
+        if fallback_clang.is_some() {
+            rustc_flags.push(format!("-C link-arg=--target={clang_target}"));
+            rustc_flags.push("-C link-arg=-fuse-ld=lld".to_string());
+        }
+        if !rustc_flags.is_empty() {
+            let flag = rustc_flags.join(" ");
+            let combined = match std::env::var("RUSTFLAGS") {
+                Ok(existing) if !existing.trim().is_empty() => format!("{existing} {flag}"),
+                _ => flag.clone(),
+            };
+            cmd.env("RUSTFLAGS", combined);
+            cmd.env(format!("CARGO_TARGET_{key}_RUSTFLAGS"), flag);
         }
 
         if matches!(subcommand, "test" | "run" | "bench") {

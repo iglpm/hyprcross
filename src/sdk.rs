@@ -11,11 +11,11 @@ use crate::builder::find_executable;
 use crate::targets::{TargetEnv, TargetInfo, TargetOs};
 use crate::ui;
 
-pub const DEFAULT_SDK_REPO: &str = "https://github.com/runepm/sdks/releases/download/v2027.0.0";
-pub const FALLBACK_SDK_REPO: &str = "https://github.com/runepm/sdks/releases/download/v1.0.0";
+pub const DEFAULT_SDK_REPO: &str = "https://github.com/runepm/sdks/releases/download/v2027.0.1";
+pub const FALLBACK_SDK_REPO: &str = "https://github.com/runepm/sdks/releases/download/v2027.0.0";
 
 pub const MACOS_SDK_PRIMARY_URL: &str =
-    "https://github.com/runepm/sdks/releases/download/v2027.0.0/MacOSX.sdk.tar.xz";
+    "https://github.com/runepm/sdks/releases/download/v2027.0.1/MacOSX.sdk.tar.xz";
 pub const MACOS_SDK_FALLBACK_URL: &str =
     "https://github.com/joseluisq/macosx-sdks/releases/download/26.1/MacOSX26.1.sdk.tar.xz";
 
@@ -618,9 +618,29 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<()> {
         let entry = entry?;
         let src_path = entry.path();
         let dst_path = dst.join(entry.file_name());
-        if src_path.is_dir() {
+        let file_type = entry.file_type()?;
+
+        if file_type.is_symlink() {
+            #[cfg(unix)]
+            {
+                let target = fs::read_link(&src_path)?;
+                let _ = fs::remove_file(&dst_path);
+                std::os::unix::fs::symlink(&target, &dst_path)?;
+            }
+            #[cfg(windows)]
+            {
+                let target = fs::read_link(&src_path)?;
+                let _ = fs::remove_file(&dst_path);
+                if src_path.is_dir() {
+                    std::os::windows::fs::symlink_dir(&target, &dst_path)?;
+                } else {
+                    std::os::windows::fs::symlink_file(&target, &dst_path)?;
+                }
+            }
+        } else if file_type.is_dir() {
             copy_dir_recursive(&src_path, &dst_path)?;
         } else {
+            let _ = fs::remove_file(&dst_path);
             fs::copy(&src_path, &dst_path)?;
         }
     }

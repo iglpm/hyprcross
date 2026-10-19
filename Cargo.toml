@@ -54,6 +54,6 @@ tempfile = "3"
 [workspace]
 members = [
     ".",
-    "crates/cargo-hyprcross",
+    "crates/cargo-hyprcross", "examples/stub-test",
 ]
 
