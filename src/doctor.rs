@@ -141,7 +141,27 @@ pub fn run_doctor() {
         }
     }
 
-    // Containers.
+    // Target SDKs and sysroots.
+    let sdks_dir = crate::sdk::default_sdks_dir();
+    let installed_sdks: usize = crate::sdk::KNOWN_SDKS
+        .iter()
+        .filter(|s| crate::sdk::is_valid_sdk(&crate::sdk::sdk_path_for_target(s.triple)))
+        .count();
+    if installed_sdks > 0 {
+        r.ok(format!(
+            "target SDKs: {} installed in {}",
+            ui::plural(installed_sdks, "SDK"),
+            ui::dim(ui::tilde(&sdks_dir))
+        ));
+    } else {
+        r.ok(format!(
+            "target SDKs: {} available for automatic download to {}",
+            crate::sdk::KNOWN_SDKS.len(),
+            ui::dim(ui::tilde(&sdks_dir))
+        ));
+    }
+
+    // Containers (optional fallback for custom Dockerfiles).
     let mut engine_ok = None;
     for kind in ContainerEngineKind::ALL {
         let Some(path) = find_executable(kind.name()) else {
@@ -152,28 +172,15 @@ pub fn run_doctor() {
             let v = version_of(&engine.path)
                 .map(|v| v.replace(" version ", " ").replace(',', ""))
                 .unwrap_or_else(|| kind.name().into());
-            let how = if cfg!(target_os = "linux") {
-                "warm containers answer over a socket"
-            } else {
-                "warm containers run builds through exec"
-            };
             r.ok(format!(
-                "{v} runs build containers {}",
-                ui::dim(format!("({how})"))
+                "{v} runs optional custom container images"
             ));
             engine_ok = Some(engine);
             break;
         }
-        r.problem(
-            format!("{} is installed but not answering", kind.name()),
-            kind.service_hint(),
-        );
     }
-    if engine_ok.is_none() && !crate::engine::any_container_engine() {
-        r.problem(
-            "no container engine",
-            "targets without a C toolchain on this machine need one: install Podman or Docker",
-        );
+    if engine_ok.is_none() {
+        r.info("no container engine (not needed: hyprcross links natively via target SDKs)");
     }
 
     // Emulators for tests.

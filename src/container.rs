@@ -690,7 +690,7 @@ impl ContainerSpec {
                     std::fs::create_dir_all(&home).ok();
                     mounts.push(Mount {
                         host: home.clone(),
-                        container: home,
+                        container: home.clone(),
                         read_only: false,
                     });
                     env.push(("RUNE_HOME".into(), home.display().to_string()));

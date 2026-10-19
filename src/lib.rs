@@ -17,6 +17,7 @@ pub mod host;
 pub mod hyprlnk_driver;
 pub mod macos;
 pub mod qemu;
+pub mod sdk;
 pub mod targets;
 pub mod ui;
 pub mod workspace;
@@ -110,6 +111,9 @@ fn dispatch(args: Vec<OsString>) -> Result<i32> {
         }
         Some(Commands::Daemon(a)) => {
             daemon_command(a.action.unwrap_or(DaemonAction::Status), config)
+        }
+        Some(Commands::Sdk(a)) => {
+            sdk_command(a.action.unwrap_or(cli::SdkAction::List))
         }
         Some(Commands::Images(a)) => images_command(a.action, config),
         Some(Commands::Agent { .. }) => unreachable!("handled above"),
@@ -333,22 +337,35 @@ fn list_targets(config: &Config, query: &[String]) {
             }
             None => ui::dim("?"),
         };
-        let runner = match info.image_runner() {
+        let runner = match info.host_runner() {
             targets::Runner::None => {
                 if info.os == TargetOs::MacOS {
-                    "macOS SDK stubs · hyprlnk".to_string()
+                    "macOS SDK · hyprlnk".to_string()
                 } else if info.env == targets::TargetEnv::Msvc {
-                    "MSVC · hyprlnk".to_string()
+                    "MSVC SDK · hyprlnk".to_string()
+                } else if info.os == TargetOs::Linux {
+                    "Linux SDK · hyprlnk".to_string()
                 } else {
-                    String::new()
+                    "hyprlnk".to_string()
                 }
             }
             r => format!("tests: {r}"),
         };
+        let sdk_tag = if crate::sdk::target_needs_sdk(&info) {
+            let path = crate::sdk::sdk_path_for_target(t);
+            if crate::sdk::is_valid_sdk(&path) {
+                ui::dim(" · SDK ready")
+            } else {
+                ui::dim(" · auto-SDK")
+            }
+        } else {
+            ui::dim(" · native")
+        };
         ui::out(format!(
-            "  {mark} {t:<width$}{:<11}{}",
+            "  {mark} {t:<width$}{:<11}{}{}",
             engine,
-            ui::dim(runner)
+            ui::dim(runner),
+            sdk_tag
         ));
     }
     ui::out("");
@@ -574,6 +591,28 @@ fn images_command(action: ImagesAction, config: Config) -> Result<i32> {
                     format!("{} on the old image", ui::plural(n, "warm container")),
                 );
             }
+            Ok(0)
+        }
+    }
+}
+
+fn sdk_command(action: cli::SdkAction) -> Result<i32> {
+    match action {
+        cli::SdkAction::List => {
+            sdk::list_sdks()?;
+            Ok(0)
+        }
+        cli::SdkAction::Install { targets, all } => {
+            sdk::install_sdks(&targets, all)?;
+            Ok(0)
+        }
+        cli::SdkAction::Remove { targets, all } => {
+            sdk::remove_sdks(&targets, all)?;
+            Ok(0)
+        }
+        cli::SdkAction::Path { target } => {
+            let path = sdk::sdk_path_for_target(&target);
+            println!("{}", path.display());
             Ok(0)
         }
     }

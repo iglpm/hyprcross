@@ -85,17 +85,27 @@ impl<'a> DirectEngine<'a> {
             cmd.env(&linker_var, cc);
         }
 
-        if self.target.os == crate::targets::TargetOs::MacOS {
-            let sdk = crate::macos::ensure_macos_sdk()?;
-            cmd.env("SDKROOT", &sdk);
+        // Ensure the target SDK is available for linking
+        let maybe_sdk = if subcommand != "clean" {
+            crate::sdk::ensure_sdk(self.target)?
+        } else {
+            None
+        };
 
-            // On non-macOS hosts (e.g. Linux), cc-rs cross-compiling for Apple targets defaults to
-            // the host `cc` (typically GCC), which does not recognize Apple flags (-arch, -mmacosx-version-min).
-            // Direct clang to cross-compile for the target triple with the macOS SDK.
+        if let Some(sdk) = &maybe_sdk {
+            cmd.env("SDKROOT", sdk);
+            cmd.env("HYPRCROSS_SDK_PATH", sdk);
+            let sdk_key = format!("HYPRCROSS_SDK_PATH_{key}");
+            cmd.env(sdk_key, sdk);
+
             let triple_underscore = triple.replace(['-', '.'], "_");
             if let Some(clang) = find_executable("clang") {
                 let clang_path = clang.display().to_string();
-                let cflags = format!("--target={triple} -isysroot {}", sdk.display());
+                let cflags = if self.target.os == crate::targets::TargetOs::MacOS {
+                    format!("--target={triple} -isysroot {}", sdk.display())
+                } else {
+                    format!("--target={triple} --sysroot={}", sdk.display())
+                };
 
                 cmd.env(format!("CC_{triple}"), &clang_path);
                 cmd.env(format!("CC_{triple_underscore}"), &clang_path);
@@ -136,6 +146,26 @@ impl<'a> DirectEngine<'a> {
             if let Some(flavor) = hyprlnk_driver::rustc_linker_flavor(triple) {
                 rustc_flags.push(format!("-C linker-flavor={flavor}"));
             }
+            if let Some(sdk) = &maybe_sdk {
+                if self.target.os == crate::targets::TargetOs::MacOS {
+                    rustc_flags.push(format!("-C link-arg=-syslibroot -C link-arg={}", sdk.display()));
+                } else if self.target.env == crate::targets::TargetEnv::Msvc {
+                    let arch = match self.target.arch {
+                        crate::targets::TargetArch::X86_64 => "x64",
+                        crate::targets::TargetArch::Aarch64 => "arm64",
+                        crate::targets::TargetArch::X86 => "x86",
+                        _ => "x64",
+                    };
+                    rustc_flags.push(format!("-C link-arg=/LIBPATH:{}/lib/{arch}", sdk.display()));
+                    rustc_flags.push(format!("-C link-arg=/LIBPATH:{}/um/{arch}", sdk.display()));
+                    rustc_flags.push(format!("-C link-arg=/LIBPATH:{}/ucrt/{arch}", sdk.display()));
+                } else if self.target.os == crate::targets::TargetOs::Linux
+                    || self.target.os == crate::targets::TargetOs::Android
+                    || self.target.os == crate::targets::TargetOs::FreeBsd
+                {
+                    rustc_flags.push(format!("-C link-arg=--sysroot={}", sdk.display()));
+                }
+            }
             if !rustc_flags.is_empty() {
                 let flag = rustc_flags.join(" ");
                 match std::env::var("RUSTFLAGS") {
@@ -148,11 +178,13 @@ impl<'a> DirectEngine<'a> {
         if matches!(subcommand, "test" | "run" | "bench") {
             let runner_var = format!("CARGO_TARGET_{key}_RUNNER");
             let tc = self.config.get_target(triple);
+            let explicit_sysroot = tc.and_then(|t| t.sysroot.as_deref());
+            let sysroot_path = explicit_sysroot.or(maybe_sdk.as_deref());
             if std::env::var_os(&runner_var).is_none()
                 && let Some(runner) = qemu::host_runner_command(
                     self.target,
                     tc.and_then(|t| t.runner.as_deref()),
-                    tc.and_then(|t| t.sysroot.as_deref()),
+                    sysroot_path,
                 )
             {
                 ui::trace(format!("{runner_var}={runner}"));

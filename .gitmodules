@@ -1,6 +1,6 @@
 [submodule "hyprlnk"]
 	path = hyprlnk
-	url = ../hyprlnk.git
+	url = https://github.com/runepm/hyprlnk.git
 [submodule "sdks"]
 	path = sdks
 	url = https://github.com/runepm/sdks.git

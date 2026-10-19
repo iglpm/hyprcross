@@ -12,7 +12,7 @@ use crate::config::Config;
 use crate::container::{ContainerEngine, ContainerRunner, command_env};
 use crate::daemon::{ContainerDaemon, Job};
 use crate::direct::{DirectEngine, host_c_compiler};
-use crate::targets::{TargetEnv, TargetInfo, TargetOs, current_host_triple};
+use crate::targets::{TargetInfo, TargetOs};
 use crate::ui;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -254,34 +254,17 @@ fn verb(subcommand: &str) -> &'static str {
     }
 }
 
-/// `auto`: on the host when it can build the target (its own target, macOS via SDK stubs,
-/// one that needs no C toolchain, or one whose C compiler is installed), in a container when there
-/// is an image and an engine to run it, else on the host anyway.
+/// `auto`: builds natively on the host using automatic target SDK bootstrapping
+/// and hyprlnk linking. Container execution is used only when a custom image or Dockerfile
+/// is configured for the target.
 pub fn auto_engine(target: &TargetInfo, config: &Config) -> Engine {
-    let host = TargetInfo::parse(current_host_triple());
-    let same_os_family = match (&target.os, &host.os) {
-        (TargetOs::MacOS, TargetOs::MacOS) => true,
-        (TargetOs::Windows, TargetOs::Windows) => target.env == TargetEnv::Msvc,
-        _ => false,
-    };
-    if target.is_host() || same_os_family || target.links_without_c_toolchain() {
-        return Engine::Direct;
-    }
-    if target.os == TargetOs::MacOS {
-        return Engine::Direct;
-    }
-    if host_c_compiler(target).is_some() {
-        return Engine::Direct;
-    }
     let tc = config.get_target(&target.triple);
-    let has_image = target.has_prebuilt_image()
-        || tc.is_some_and(|t| t.image.is_some() || t.dockerfile.is_some());
-    let has_engine = ContainerEngine::detect(&config.build.container_engine).is_ok();
-    if has_image && has_engine {
-        Engine::Container
-    } else {
-        Engine::Direct
+    if tc.is_some_and(|t| t.image.is_some() || t.dockerfile.is_some())
+        && ContainerEngine::detect(&config.build.container_engine).is_ok()
+    {
+        return Engine::Container;
     }
+    Engine::Direct
 }
 
 /// Write a Hyprcross.toml for `target` in the current directory.
@@ -344,6 +327,7 @@ pub fn any_container_engine() -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::targets::current_host_triple;
 
     #[test]
     fn the_host_and_targets_without_c_toolchains_build_directly() {

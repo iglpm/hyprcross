@@ -109,6 +109,9 @@ pub enum Commands {
     /// Manage the warm build containers
     Daemon(DaemonArgs),
 
+    /// Manage target SDKs and sysroots for native cross-linking
+    Sdk(SdkArgs),
+
     /// Pull and list the build images
     Images(ImagesArgs),
 
@@ -237,3 +240,41 @@ pub struct InitArgs {
     #[arg(short, long, value_name = "TRIPLE")]
     pub target: Option<String>,
 }
+
+#[derive(Args, Debug, Clone, Default)]
+pub struct SdkArgs {
+    #[command(subcommand)]
+    pub action: Option<SdkAction>,
+}
+
+#[derive(Subcommand, Debug, Clone)]
+pub enum SdkAction {
+    /// List available and installed target SDKs
+    List,
+    /// Download and install SDKs for one or more targets
+    #[command(alias = "pull")]
+    Install {
+        /// Target triple(s) to install (e.g. aarch64-unknown-linux-gnu)
+        #[arg(value_name = "TARGETS")]
+        targets: Vec<String>,
+        /// Install SDKs for all known targets
+        #[arg(long)]
+        all: bool,
+    },
+    /// Remove installed SDKs for one or more targets
+    Remove {
+        /// Target triple(s) to remove
+        #[arg(value_name = "TARGETS")]
+        targets: Vec<String>,
+        /// Remove all installed SDKs
+        #[arg(long)]
+        all: bool,
+    },
+    /// Print the filesystem path of a target's SDK
+    Path {
+        /// Target triple
+        #[arg(value_name = "TARGET")]
+        target: String,
+    },
+}
+

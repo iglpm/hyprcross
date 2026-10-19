@@ -410,7 +410,7 @@ impl TargetInfo {
         }
     }
 
-    fn arch_matches_host(&self) -> bool {
+    pub fn arch_matches_host(&self) -> bool {
         let host = current_host_triple();
         host.split('-').next() == self.triple.split('-').next()
     }

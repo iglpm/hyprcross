@@ -1,6 +1,4 @@
 use hyprcross::targets::{IMAGE_TARGETS, TargetArch, TargetInfo, TargetOs};
-use std::collections::BTreeSet;
-use std::path::Path;
 
 #[test]
 fn test_all_primary_targets() {
@@ -123,36 +121,17 @@ fn test_prebuilt_image_support() {
     assert!(!TargetInfo::parse("aarch64-apple-darwin").has_prebuilt_image());
 }
 
-/// `docker/Dockerfile.<target>` and `IMAGE_TARGETS` must name the same targets: hyprcross pulls
-/// images for the targets it lists, and CI builds one image per Dockerfile.
+/// Every target in `IMAGE_TARGETS` has an SDK definition in `KNOWN_SDKS` or links without a C toolchain.
 #[test]
-fn every_image_target_has_a_dockerfile_and_back() {
-    let docker = Path::new(env!("CARGO_MANIFEST_DIR")).join("docker");
-    let files: BTreeSet<String> = std::fs::read_dir(&docker)
-        .expect("docker/ exists")
-        .filter_map(|e| e.ok())
-        .filter_map(|e| {
-            e.file_name()
-                .to_str()?
-                .strip_prefix("Dockerfile.")
-                .map(str::to_string)
-        })
-        .collect();
-    let listed: BTreeSet<String> = IMAGE_TARGETS.iter().map(|s| s.to_string()).collect();
-    assert_eq!(
-        files, listed,
-        "docker/Dockerfile.* and targets::IMAGE_TARGETS differ"
-    );
-
-    for target in &files {
-        let text = std::fs::read_to_string(docker.join(format!("Dockerfile.{target}"))).unwrap();
+fn every_target_has_sdk_support() {
+    for target in IMAGE_TARGETS {
+        let info = TargetInfo::parse(target);
+        if info.links_without_c_toolchain() {
+            continue;
+        }
         assert!(
-            text.contains(&format!("dev.hyprcross.target=\"{target}\"")),
-            "Dockerfile.{target} labels another target"
-        );
-        assert!(
-            text.contains("# hyprcross:platforms "),
-            "Dockerfile.{target} doesn't say which platforms CI builds it for"
+            hyprcross::sdk::find_sdk_def(target).is_some(),
+            "target {target} missing SDK definition in KNOWN_SDKS"
         );
     }
 }

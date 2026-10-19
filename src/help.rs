@@ -11,8 +11,8 @@ const SECTIONS: &[(&str, &[&str])] = &[
         ],
     ),
     (
-        "Targets and containers",
-        &["targets", "doctor", "daemon", "images", "init"],
+        "Targets and SDKs",
+        &["targets", "sdk", "doctor", "daemon", "images", "init"],
     ),
 ];
 

@@ -1,39 +1,45 @@
 # Architecture
 
-hyprcross decides, per target, whether a build can run on the host or needs a container; runs
-the builder (Rune or Cargo) there with the target's linker and test runner; and keeps
-containers warm so the second build costs what it would on the host.
+hyprcross cross-compiles directly on the host using lightweight native SDK / sysroot packages and
+links natively with **hyprlnk**. Containers are no longer required for ordinary cross-compilation,
+eliminating the need for Docker or Podman on Windows, Linux, and macOS. When containerized builds are
+explicitly requested (or when custom Dockerfiles are configured), hyprcross uses warm containers with
+a Unix socket agent.
 
 ```text
 hyprcross build -t <target>
         │
-        ├─ host can build it ──────────► direct: rune/cargo on the host
-        │  (own target, no C needed,        linker = the target's C compiler
-        │   C cross compiler installed)     runner = QEMU / Wine / Wasmtime
+        ├─ native direct (default) ────► direct: rune/cargo on host
+        │  (uses hyprlnk, auto-downloads   passes --sysroot, SDKROOT,
+        │   lightweight SDK if missing)     runner = QEMU / Wine / Wasmtime
         │
-        └─ otherwise ──────────────────► container: rune/cargo in the target's image
-                                            warm container, agent over a Unix socket
+        └─ container requested ────────► container: rune/cargo in image
+           (--engine container, or          warm container, agent over Unix socket
+            custom image / dockerfile)
 ```
 
 ## Choosing where to build
 
-With `engine = "auto"` (the default), a target builds on the host when
+With `engine = "auto"` (the default), builds run **directly on the host**:
 
-- it is the host's own target, or the same OS family (macOS on macOS, MSVC on Windows),
-- it needs no C toolchain to link (bare metal, `wasm32-*`): Rust's own `rust-lld` links it, or
-- its C cross compiler is on PATH (`aarch64-linux-gnu-gcc`, `x86_64-w64-mingw32-gcc`, or what
-  `CC_<triple>` / `CARGO_TARGET_<TRIPLE>_LINKER` names),
+- All supported targets (Linux glibc/musl on x86_64, AArch64, ARM, RISC-V, etc., macOS Darwin, Windows MSVC/MinGW)
+  are compiled using rustc and linked directly via **hyprlnk**.
+- Target SDKs / sysroots are checked at `~/.local/share/hyprcross/sdks/<target>`. If missing, hyprcross
+  downloads and unpacks the minimal SDK package on demand automatically.
+- Tests, runs, and benchmarks invoke host-native runners: QEMU (`-L <sdk_sysroot>`) for Linux, Wine
+  for Windows, or Wasmtime for WASI.
 
-and in a container otherwise, if there is an image for it and a container engine to run it.
-`hyprcross targets` shows the decision for every target with an image; `--engine` or the
-target's `engine` setting overrides it.
+Containers are only chosen if:
+- `--engine container` is explicitly passed on the command line, or
+- `image` or `dockerfile` is configured in `Hyprcross.toml`.
 
-## Direct builds
+## Direct builds & native SDKs
 
-The builder runs on the host with `--target`. For a cross target hyprcross names the C cross
-compiler as `CARGO_TARGET_<TRIPLE>_LINKER` (unless it is set already): without it rustc would
-link with the host's `cc`. For `test`, `run` and `bench` it sets `CARGO_TARGET_<TRIPLE>_RUNNER`
-to QEMU (with the target's sysroot as `-L`), Wine or Wasmtime when they are installed.
+The builder runs on the host with `--target`. hyprcross configures:
+- `CARGO_TARGET_<TRIPLE>_LINKER = "hyprlnk"` (or hyprcross' built-in link driver)
+- `RUSTFLAGS`: sets `-Clinker-flavor` (`ld.lld` for Linux ELF, `ld64.lld` for macOS Mach-O, `lld-link` for Windows PE/COFF) and `--sysroot=<sdk_path>`
+- `SDKROOT` / `HYPRCROSS_SDK_PATH`: points to the target SDK directory
+- `CARGO_TARGET_<TRIPLE>_RUNNER`: sets QEMU (pointing to the SDK sysroot via `-L`), Wine, or Wasmtime if installed on the host.
 
 A missing standard library is installed with `rustup target add` first. Whether it is missing
 is read from the toolchain's directory, so a build that needs nothing installed starts no

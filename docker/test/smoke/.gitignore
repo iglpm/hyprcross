@@ -1,6 +1,0 @@
-target/
-Cargo.lock
-Rune.lock.bin
-.rune/
-# QEMU writes these when a test binary crashes under it.
-qemu_*.core
