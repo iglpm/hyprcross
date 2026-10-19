@@ -5,20 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [v2027.0.0-rc.2] - 2026-10-18
+## [v2027.0.0-rc.2] - 2026-10-20
 
 ### Added
+- **Universal Clang/LLD Linker Driver Fallback**: For all non-host targets when no host-native cross GCC compiler is detected (e.g. `aarch64-linux-gnu-gcc`), `hyprcross` now automatically configures `clang` as the linker driver and sets `-fuse-ld=lld` along with normalized target triples (e.g. `riscv64-unknown-linux-*`, `x86_64-w64-mingw32`, `x86_64-w64-windows-gnu`).
+- **Comprehensive Target Sysroot Resolution**: Added automated library search path injection (`-L<sdk>/usr/lib`, `-L<sdk>/lib`, and `-L<sdk>/usr/lib/21` for Android) across Linux GNU, Linux musl, Android, FreeBSD, and Windows targets.
 - **POSIX Path Translation on Windows**: On Windows hosts, the project workspace root is mounted to `/project` inside build containers, with subdirectories and working directories translated from Windows backslash paths to standard forward-slash POSIX paths. External path dependencies and caches (`CARGO_HOME` -> `/cargo`, `RUNE_HOME` -> `/rune`, `CARGO_TARGET_DIR` -> `/target`) are mapped cleanly without invalid Windows drive letter syntax in container volume specifications.
 - **Standalone Linux Toolchain Support**: Non-Linux hosts (Windows and macOS) automatically prefer `cross-rs` container images that contain self-contained Linux `rustc` and `cargo` toolchains pre-installed, avoiding errors caused by attempting to mount or run host-native PE (`.exe`) or Mach-O binaries in Linux containers.
 - **Docker Image Rust Toolchain**: Updated the common container build script (`docker/scripts/common.sh`) to bundle a standalone Rust toolchain directly in container image builds, enabling self-contained compilation on non-Linux hosts without relying on host toolchain mounts.
 - **OS-Aware Service Diagnostics**: Added platform-tailored service recovery instructions to `ContainerEngineKind::service_hint()`, giving actionable advice for Windows/macOS (`podman machine start` or starting Docker Desktop) and Linux (`sudo systemctl start docker` or `podman.socket`).
 
 ### Changed
+- **Direct Mode Driver Orchestration**: Set `HYPRLNK_CC` to the detected Clang driver when no target-specific GCC binary is present, enabling `hyprlnk` to invoke the correct compiler driver during direct cross-linking.
+- **MSVC Environment Resolution**: Enhanced `DirectEngine` to dynamically search both `xwin` splat directories (`crt/lib/<arch>`, `sdk/lib/um/<arch>`, `sdk/lib/ucrt/<arch>`) and flat layouts, populating both `/LIBPATH` arguments and the `LIB` environment variable.
 - **Engine Auto-Detection Priority**: `ContainerEngine::detect("auto")` now checks engine availability and prioritizes an installed container engine that is actively responding over dead or uninitialized services.
 - **Non-Linux Container Builder**: On Windows and macOS, container builds drive the image's internal Linux `cargo` toolchain, ensuring Cargo links with the container's cross C compiler instead of attempting to run host-native `rune` or `hyprlnk` executables.
 - **Skip Host Target std Installation**: Container builds on Windows and macOS no longer attempt to run `rustup target add` on the host, since builds execute inside self-contained Linux container images.
 
 ### Fixed
+- **Symlink Preservation During SDK Extraction**: Fixed `copy_dir_recursive` in `sdk.rs` crashing on broken relative symlinks by explicitly creating symbolic links (`std::os::unix::fs::symlink`) instead of attempting direct file copy operations.
+- **GNU ld Script Absolute Host Paths**: Sanitized Debian/Ubuntu glibc `libc.so` and `libm.so` linker scripts by stripping hardcoded host `/usr/<arch>/lib/` and `/lib/<arch>/` paths in SDK sysroots.
+- **Android NDK Startfiles & Runtime Libs**: Configured relative symlinks for Android API 21+ startfiles (`crtbegin_dynamic.o`, `crtend_android.o`) and packaged `libunwind.a` and compiler builtins directly in the sysroot root.
+- **Windows gnullvm Runtime Linking**: Packaged `llvm-mingw` for `x86_64-pc-windows-gnullvm` and added `libunwind.a` compatibility symlinks for `-lgcc` / `-lgcc_eh`.
+- **Linux musl GCC Runtime Objects**: Extracted `libgcc.a` and `crtbegin*.o` / `crtend*.o` into musl sysroots to support direct non-container cross-linking.
 - **Podman Dead Network Socket Crash**: Fixed a bug where `check_service_available()` hardcoded `return true` for Podman under the assumption that Podman is always daemonless. On Windows and macOS, Podman relies on a virtual machine (`podman-machine`), and an unstarted VM caused WSAENETDOWN socket errors (`dial unix /run/podman/podman.sock: connect: A socket operation encountered a dead network.`) and false positive green checkmarks in `hyprcross doctor`.
 - **Misleading Registry Fallback on Connection Errors**: `ImageRequest::resolve` no longer misinterprets container engine connection failures as missing registry images.
 - **Working Directory in Container Runner & Daemon**: Fixed container working directory propagation (`-w`) in `ContainerRunner` and `daemon.exec` so that translated container paths (`/project/...`) are passed instead of raw host paths.
