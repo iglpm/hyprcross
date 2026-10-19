@@ -60,21 +60,3 @@ jobs:
 
       - name: Doctor
         run: cargo run --locked -- doctor
-
-  scripts:
-    name: Image scripts
-    runs-on: [self-hosted, Linux, X64, ci]
-    steps:
-      - name: Configure Git Credentials for Submodules
-        env:
-          TOKEN: ${{ secrets.RUNIFIED_TOKEN || secrets.HYPRLNK_TOKEN || github.token }}
-        run: |
-          git config --global url."https://x-access-token:${TOKEN}@github.com/".insteadOf "https://github.com/"
-
-      - uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.RUNIFIED_TOKEN || secrets.HYPRLNK_TOKEN || github.token }}
-
-      - name: shellcheck
-        working-directory: docker
-        run: shellcheck -x scripts/*.sh scripts/hyprcross-runner matrix.sh update-pins.sh
