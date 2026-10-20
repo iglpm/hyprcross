@@ -612,12 +612,12 @@ fn extract_tarball(tarball: &Path, dest: &Path) -> Result<()> {
                 let mut symlink_paths = Vec::new();
                 for line in stdout.lines() {
                     let line = line.trim();
-                    if line.starts_with('l') && line.contains(" -> ") {
-                        if let Some(left) = line.split(" -> ").next()
-                            && let Some(p) = left.split_whitespace().last()
-                        {
-                            symlink_paths.push(p.to_string());
-                        }
+                    if line.starts_with('l')
+                        && line.contains(" -> ")
+                        && let Some(left) = line.split(" -> ").next()
+                        && let Some(p) = left.split_whitespace().last()
+                    {
+                        symlink_paths.push(p.to_string());
                     }
                 }
                 if !symlink_paths.is_empty()
@@ -639,12 +639,16 @@ fn extract_tarball(tarball: &Path, dest: &Path) -> Result<()> {
             let output = cmd.output().context("failed to invoke tar")?;
             if output.status.success()
                 || (output.status.code() == Some(1)
-                    && fs::read_dir(dest).map_or(false, |mut it| it.next().is_some()))
+                    && fs::read_dir(dest).is_ok_and(|mut it| it.next().is_some()))
             {
                 return Ok(());
             }
             let stderr = String::from_utf8_lossy(&output.stderr);
-            bail!("tar exited with code {:?}: {}", output.status.code(), stderr.trim());
+            bail!(
+                "tar exited with code {:?}: {}",
+                output.status.code(),
+                stderr.trim()
+            );
         }
 
         #[cfg(not(any(windows, target_os = "macos")))]
@@ -660,7 +664,11 @@ fn extract_tarball(tarball: &Path, dest: &Path) -> Result<()> {
                 return Ok(());
             }
             let stderr = String::from_utf8_lossy(&output.stderr);
-            bail!("tar exited with code {:?}: {}", output.status.code(), stderr.trim());
+            bail!(
+                "tar exited with code {:?}: {}",
+                output.status.code(),
+                stderr.trim()
+            );
         }
     }
     bail!("`tar` executable not found on PATH to extract SDK archive")
@@ -769,7 +777,8 @@ fn restore_tarball_symlinks(tarball: &Path, dest: &Path) -> Result<()> {
                     let _ = fs::create_dir_all(parent);
                 }
                 if target_path.is_dir() {
-                    let is_cycle = full_link.starts_with(&target_path) || target_path.starts_with(&full_link);
+                    let is_cycle =
+                        full_link.starts_with(&target_path) || target_path.starts_with(&full_link);
                     #[cfg(windows)]
                     let ok = std::os::windows::fs::symlink_dir(&target_path, &full_link).is_ok()
                         || create_windows_junction(&full_link, &target_path)
@@ -858,12 +867,16 @@ fn copy_dir_recursive_depth(src: &Path, dst: &Path, depth: usize) -> Result<()> 
                 let _ = fs::remove_file(&dst_path);
                 let _ = fs::remove_dir_all(&dst_path);
                 let resolved = if target.is_relative() {
-                    src_path.parent().map(|p| p.join(&target)).unwrap_or_else(|| target.clone())
+                    src_path
+                        .parent()
+                        .map(|p| p.join(&target))
+                        .unwrap_or_else(|| target.clone())
                 } else {
                     target.clone()
                 };
                 if src_path.is_dir() || resolved.is_dir() {
-                    let is_cycle = dst_path.starts_with(&resolved) || resolved.starts_with(&dst_path);
+                    let is_cycle =
+                        dst_path.starts_with(&resolved) || resolved.starts_with(&dst_path);
                     if std::os::windows::fs::symlink_dir(&target, &dst_path).is_err()
                         && !create_windows_junction(&dst_path, &resolved)
                         && resolved.exists()

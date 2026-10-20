@@ -186,12 +186,12 @@ fn extract_tarball(tarball: &Path, dest: &Path) -> Result<()> {
                 let mut symlink_paths = Vec::new();
                 for line in stdout.lines() {
                     let line = line.trim();
-                    if line.starts_with('l') && line.contains(" -> ") {
-                        if let Some(left) = line.split(" -> ").next()
-                            && let Some(p) = left.split_whitespace().last()
-                        {
-                            symlink_paths.push(p.to_string());
-                        }
+                    if line.starts_with('l')
+                        && line.contains(" -> ")
+                        && let Some(left) = line.split(" -> ").next()
+                        && let Some(p) = left.split_whitespace().last()
+                    {
+                        symlink_paths.push(p.to_string());
                     }
                 }
                 if !symlink_paths.is_empty()
@@ -213,12 +213,16 @@ fn extract_tarball(tarball: &Path, dest: &Path) -> Result<()> {
             let output = cmd.output().context("failed to invoke tar")?;
             if output.status.success()
                 || (output.status.code() == Some(1)
-                    && fs::read_dir(dest).map_or(false, |mut it| it.next().is_some()))
+                    && fs::read_dir(dest).is_ok_and(|mut it| it.next().is_some()))
             {
                 return Ok(());
             }
             let stderr = String::from_utf8_lossy(&output.stderr);
-            bail!("tar exited with code {:?}: {}", output.status.code(), stderr.trim());
+            bail!(
+                "tar exited with code {:?}: {}",
+                output.status.code(),
+                stderr.trim()
+            );
         }
 
         #[cfg(not(windows))]
@@ -234,7 +238,11 @@ fn extract_tarball(tarball: &Path, dest: &Path) -> Result<()> {
                 return Ok(());
             }
             let stderr = String::from_utf8_lossy(&output.stderr);
-            bail!("tar exited with code {:?}: {}", output.status.code(), stderr.trim());
+            bail!(
+                "tar exited with code {:?}: {}",
+                output.status.code(),
+                stderr.trim()
+            );
         }
     }
     bail!("`tar` executable not found on PATH to extract SDK archive")
