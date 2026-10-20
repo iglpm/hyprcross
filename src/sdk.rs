@@ -354,8 +354,8 @@ pub fn target_needs_sdk(target: &TargetInfo) -> bool {
     if target.is_host() || target.links_without_c_toolchain() {
         return false;
     }
-    // Musl targets have self-contained libc.a and startup files in rustup toolchain
-    if target.env == TargetEnv::Musl && target.arch_matches_host() {
+    // Musl targets have self-contained libc.a and startup files in rustup toolchain on Linux hosts
+    if cfg!(target_os = "linux") && target.env == TargetEnv::Musl && target.arch_matches_host() {
         return false;
     }
     // Bare metal & wasm don't need external SDKs
