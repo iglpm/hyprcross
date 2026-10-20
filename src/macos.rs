@@ -175,17 +175,67 @@ fn download_file(url: &str, dest: &Path) -> Result<()> {
 
 fn extract_tarball(tarball: &Path, dest: &Path) -> Result<()> {
     if find_executable("tar").is_some() {
-        let status = Command::new("tar")
-            .args(["-xf"])
-            .arg(tarball)
-            .args(["-C"])
-            .arg(dest)
-            .status()
-            .context("failed to invoke tar")?;
-        if status.success() {
-            return Ok(());
+        #[cfg(windows)]
+        {
+            let list_out = Command::new("tar").args(["-tvf"]).arg(tarball).output();
+            let mut exclude_file: Option<tempfile::NamedTempFile> = None;
+            if let Ok(lo) = list_out
+                && lo.status.success()
+            {
+                let stdout = String::from_utf8_lossy(&lo.stdout);
+                let mut symlink_paths = Vec::new();
+                for line in stdout.lines() {
+                    let line = line.trim();
+                    if line.starts_with('l') && line.contains(" -> ") {
+                        if let Some(left) = line.split(" -> ").next()
+                            && let Some(p) = left.split_whitespace().last()
+                        {
+                            symlink_paths.push(p.to_string());
+                        }
+                    }
+                }
+                if !symlink_paths.is_empty()
+                    && let Ok(mut tmp) = tempfile::NamedTempFile::new()
+                {
+                    use std::io::Write;
+                    for p in symlink_paths {
+                        let _ = writeln!(tmp, "{p}");
+                    }
+                    exclude_file = Some(tmp);
+                }
+            }
+
+            let mut cmd = Command::new("tar");
+            cmd.args(["-xf"]).arg(tarball).args(["-C"]).arg(dest);
+            if let Some(ref ef) = exclude_file {
+                cmd.arg("--exclude-from").arg(ef.path());
+            }
+            let output = cmd.output().context("failed to invoke tar")?;
+            if output.status.success()
+                || (output.status.code() == Some(1)
+                    && fs::read_dir(dest).map_or(false, |mut it| it.next().is_some()))
+            {
+                return Ok(());
+            }
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            bail!("tar exited with code {:?}: {}", output.status.code(), stderr.trim());
         }
-        bail!("tar exited with code {:?}", status.code());
+
+        #[cfg(not(windows))]
+        {
+            let output = Command::new("tar")
+                .args(["-xf"])
+                .arg(tarball)
+                .args(["-C"])
+                .arg(dest)
+                .output()
+                .context("failed to invoke tar")?;
+            if output.status.success() {
+                return Ok(());
+            }
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            bail!("tar exited with code {:?}: {}", output.status.code(), stderr.trim());
+        }
     }
     bail!("`tar` executable not found on PATH to extract SDK archive")
 }

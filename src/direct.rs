@@ -80,6 +80,7 @@ impl<'a> DirectEngine<'a> {
             .then(|| host_c_compiler(self.target))
             .flatten();
         let fallback_clang = (!self.target.is_host()
+            && !hyprlnk
             && driver.is_none()
             && self.target.env != crate::targets::TargetEnv::Msvc
             && self.target.os != crate::targets::TargetOs::None
@@ -249,6 +250,7 @@ impl<'a> DirectEngine<'a> {
 
         if fallback_clang.is_some() {
             rustc_flags.push(format!("-C link-arg=--target={clang_target}"));
+            rustc_flags.push("-C link-arg=-Wno-unused-command-line-argument".to_string());
             if self.target.lld_supported() {
                 rustc_flags.push("-C link-arg=-fuse-ld=lld".to_string());
             }

@@ -43,9 +43,15 @@ fn test_linker_flavor() {
         hyprlnk_driver::rustc_linker_flavor("aarch64-apple-darwin"),
         Some("ld64.lld")
     );
+    #[cfg(unix)]
     assert_eq!(
         hyprlnk_driver::rustc_linker_flavor("aarch64-unknown-linux-gnu"),
         None
+    );
+    #[cfg(not(unix))]
+    assert_eq!(
+        hyprlnk_driver::rustc_linker_flavor("aarch64-unknown-linux-gnu"),
+        Some("ld.lld")
     );
 }
 

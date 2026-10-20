@@ -70,7 +70,13 @@ pub fn rustc_linker_flavor(triple: &str) -> Option<&'static str> {
     }
     #[cfg(not(feature = "builtin-hyprlnk"))]
     {
-        triple.contains("-apple-").then_some("ld64.lld")
+        if triple.contains("-apple-") {
+            Some("ld64.lld")
+        } else if cfg!(not(unix)) && (triple.contains("-linux-") || triple.contains("-freebsd")) {
+            Some("ld.lld")
+        } else {
+            None
+        }
     }
 }
 
@@ -113,7 +119,11 @@ pub fn linker_for_cargo() -> Option<PathBuf> {
     {
         link_named_hyprlnk(&crate::config::cache_dir()?.join("bin"), &current_exe()?)
     }
-    #[cfg(not(unix))]
+    #[cfg(windows)]
+    {
+        link_named_hyprlnk(&crate::config::cache_dir()?.join("bin"), &current_exe()?)
+    }
+    #[cfg(not(any(unix, windows)))]
     {
         None
     }
@@ -132,6 +142,17 @@ fn link_named_hyprlnk(dir: &Path, exe: &Path) -> Option<PathBuf> {
     std::os::unix::fs::symlink(exe, &tmp).ok()?;
     std::fs::rename(&tmp, &link).ok()?;
     Some(link)
+}
+
+#[cfg(windows)]
+fn link_named_hyprlnk(dir: &Path, exe: &Path) -> Option<PathBuf> {
+    let link = dir.join("hyprlnk.exe");
+    if link.is_file() {
+        return Some(link);
+    }
+    std::fs::create_dir_all(dir).ok()?;
+    let _ = std::fs::hard_link(exe, &link).or_else(|_| std::fs::copy(exe, &link).map(|_| ()));
+    link.is_file().then_some(link)
 }
 
 #[cfg(test)]
@@ -160,7 +181,13 @@ mod tests {
             rustc_linker_flavor("aarch64-apple-darwin"),
             Some("ld64.lld")
         );
+        #[cfg(unix)]
         assert_eq!(rustc_linker_flavor("aarch64-unknown-linux-gnu"), None);
+        #[cfg(not(unix))]
+        assert_eq!(
+            rustc_linker_flavor("aarch64-unknown-linux-gnu"),
+            Some("ld.lld")
+        );
     }
 
     #[cfg(unix)]

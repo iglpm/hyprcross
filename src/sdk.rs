@@ -514,6 +514,9 @@ fn bootstrap_target_sdk(triple: &str, def: Option<&TargetSdkDef>, dest: &Path) -
         copy_dir_recursive(&source_sdk, dest)?;
     }
 
+    restore_tarball_symlinks(&tarball_path, dest)?;
+    postprocess_installed_sdk(dest);
+
     if !is_valid_sdk(dest) {
         bail!(
             "downloaded SDK at {} is incomplete or corrupted",
@@ -523,6 +526,27 @@ fn bootstrap_target_sdk(triple: &str, def: Option<&TargetSdkDef>, dest: &Path) -
 
     ui::action("installed", format!("SDK to {}", ui::tilde(dest)));
     Ok(())
+}
+
+fn postprocess_installed_sdk(dest: &Path) {
+    let strip_tool = find_executable("llvm-strip").or_else(|| find_executable("strip"));
+    if let Some(strip) = strip_tool {
+        for sub in &["usr/lib", "lib"] {
+            let lib_dir = dest.join(sub);
+            if let Ok(entries) = fs::read_dir(&lib_dir) {
+                for entry in entries.flatten() {
+                    let name = entry.file_name();
+                    let name_str = name.to_string_lossy();
+                    if name_str.starts_with("crt") && name_str.ends_with(".o") {
+                        let _ = Command::new(&strip)
+                            .args(["--strip-debug"])
+                            .arg(entry.path())
+                            .output();
+                    }
+                }
+            }
+        }
+    }
 }
 
 fn download_file(url: &str, dest: &Path) -> Result<()> {
@@ -574,19 +598,222 @@ fn download_file(url: &str, dest: &Path) -> Result<()> {
 
 fn extract_tarball(tarball: &Path, dest: &Path) -> Result<()> {
     if find_executable("tar").is_some() {
-        let status = Command::new("tar")
-            .args(["-xf"])
-            .arg(tarball)
-            .args(["-C"])
-            .arg(dest)
-            .status()
-            .context("failed to invoke tar")?;
-        if status.success() {
-            return Ok(());
+        #[cfg(windows)]
+        {
+            // On Windows, bsdtar fails with exit code 1 when creating symlinks without elevation.
+            // Furthermore, clobbering case-variant symlinks (e.g. kernel32.lib -> kernel32.Lib)
+            // will delete the real file on case-insensitive filesystems.
+            // Exclude symlinks during tar extraction; restore_tarball_symlinks will recreate them safely.
+            let list_out = Command::new("tar").args(["-tvf"]).arg(tarball).output();
+            let mut exclude_file: Option<tempfile::NamedTempFile> = None;
+            if let Ok(lo) = list_out
+                && lo.status.success()
+            {
+                let stdout = String::from_utf8_lossy(&lo.stdout);
+                let mut symlink_paths = Vec::new();
+                for line in stdout.lines() {
+                    let line = line.trim();
+                    if line.starts_with('l') && line.contains(" -> ") {
+                        if let Some(left) = line.split(" -> ").next()
+                            && let Some(p) = left.split_whitespace().last()
+                        {
+                            symlink_paths.push(p.to_string());
+                        }
+                    }
+                }
+                if !symlink_paths.is_empty()
+                    && let Ok(mut tmp) = tempfile::NamedTempFile::new()
+                {
+                    use std::io::Write;
+                    for p in symlink_paths {
+                        let _ = writeln!(tmp, "{p}");
+                    }
+                    exclude_file = Some(tmp);
+                }
+            }
+
+            let mut cmd = Command::new("tar");
+            cmd.args(["-xf"]).arg(tarball).args(["-C"]).arg(dest);
+            if let Some(ref ef) = exclude_file {
+                cmd.arg("--exclude-from").arg(ef.path());
+            }
+            let output = cmd.output().context("failed to invoke tar")?;
+            if output.status.success()
+                || (output.status.code() == Some(1)
+                    && fs::read_dir(dest).map_or(false, |mut it| it.next().is_some()))
+            {
+                return Ok(());
+            }
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            bail!("tar exited with code {:?}: {}", output.status.code(), stderr.trim());
         }
-        bail!("tar exited with code {:?}", status.code());
+
+        #[cfg(not(unix))]
+        #[cfg(not(windows))]
+        {
+            let output = Command::new("tar")
+                .args(["-xf"])
+                .arg(tarball)
+                .args(["-C"])
+                .arg(dest)
+                .output()
+                .context("failed to invoke tar")?;
+            if output.status.success() {
+                return Ok(());
+            }
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            bail!("tar exited with code {:?}: {}", output.status.code(), stderr.trim());
+        }
+
+        #[cfg(unix)]
+        {
+            let output = Command::new("tar")
+                .args(["-xf"])
+                .arg(tarball)
+                .args(["-C"])
+                .arg(dest)
+                .output()
+                .context("failed to invoke tar")?;
+            if output.status.success() {
+                return Ok(());
+            }
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            bail!("tar exited with code {:?}: {}", output.status.code(), stderr.trim());
+        }
     }
     bail!("`tar` executable not found on PATH to extract SDK archive")
+}
+
+#[cfg(windows)]
+fn create_windows_junction(link: &Path, target: &Path) -> bool {
+    let cmd = format!("mklink /J \"{}\" \"{}\"", link.display(), target.display());
+    Command::new("cmd")
+        .args(["/c", &cmd])
+        .output()
+        .is_ok_and(|out| out.status.success())
+}
+
+#[cfg(windows)]
+fn restore_tarball_symlinks(tarball: &Path, dest: &Path) -> Result<()> {
+    if find_executable("tar").is_none() {
+        return Ok(());
+    }
+    let output = Command::new("tar")
+        .args(["-tvf"])
+        .arg(tarball)
+        .output()
+        .context("failed to list archive contents with tar -tvf")?;
+    if !output.status.success() {
+        return Ok(());
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut symlinks = Vec::new();
+
+    for line in stdout.lines() {
+        let line = line.trim();
+        if !line.starts_with('l') || !line.contains(" -> ") {
+            continue;
+        }
+        let mut parts = line.splitn(2, " -> ");
+        let left = parts.next().unwrap_or("").trim();
+        let target_str = parts.next().unwrap_or("").trim();
+        if left.is_empty() || target_str.is_empty() {
+            continue;
+        }
+        if let Some(link_path_raw) = left.split_whitespace().last() {
+            let link_path = link_path_raw
+                .trim_start_matches("./")
+                .trim_start_matches(".\\")
+                .trim_start_matches('/');
+            symlinks.push((link_path.to_string(), target_str.to_string()));
+        }
+    }
+
+    if symlinks.is_empty() {
+        return Ok(());
+    }
+
+    // Loop up to 5 passes to resolve chained symlinks (e.g. A -> B -> C)
+    for _pass in 0..5 {
+        let mut progress = false;
+        for (link_rel, target_raw) in &symlinks {
+            let link_norm = link_rel.replace('/', std::path::MAIN_SEPARATOR_STR);
+            let full_link = dest.join(link_norm);
+            if full_link.exists() || full_link.is_symlink() {
+                continue;
+            }
+
+            let link_dir = full_link.parent().unwrap_or(dest);
+            let target_norm = target_raw.replace('/', std::path::MAIN_SEPARATOR_STR);
+
+            let mut resolved: Option<PathBuf> = None;
+
+            // 1. Relative from link directory
+            let cand1 = link_dir.join(&target_norm);
+            if cand1.exists() {
+                resolved = Some(cand1);
+            }
+
+            // 2. Relative from sysroot root (dest)
+            if resolved.is_none() {
+                let cand2 = dest.join(target_norm.trim_start_matches(std::path::MAIN_SEPARATOR));
+                if cand2.exists() {
+                    resolved = Some(cand2);
+                }
+            }
+
+            // 3. Fallback: search by file name
+            if resolved.is_none()
+                && let Some(file_name) = Path::new(&target_norm).file_name()
+            {
+                let cand3 = link_dir.join(file_name);
+                if cand3.exists() {
+                    resolved = Some(cand3);
+                } else {
+                    let cand4 = dest.join("usr").join("lib").join(file_name);
+                    if cand4.exists() {
+                        resolved = Some(cand4);
+                    } else {
+                        let cand5 = dest.join("lib").join(file_name);
+                        if cand5.exists() {
+                            resolved = Some(cand5);
+                        }
+                    }
+                }
+            }
+
+            if let Some(target_path) = resolved {
+                if let Some(parent) = full_link.parent() {
+                    let _ = fs::create_dir_all(parent);
+                }
+                if target_path.is_dir() {
+                    let is_cycle = full_link.starts_with(&target_path) || target_path.starts_with(&full_link);
+                    let ok = std::os::windows::fs::symlink_dir(&target_path, &full_link).is_ok()
+                        || create_windows_junction(&full_link, &target_path)
+                        || (!is_cycle && copy_dir_recursive(&target_path, &full_link).is_ok());
+                    if ok {
+                        progress = true;
+                    }
+                } else if target_path.is_file() {
+                    let ok = std::os::windows::fs::symlink_file(&target_path, &full_link).is_ok()
+                        || fs::hard_link(&target_path, &full_link).is_ok()
+                        || fs::copy(&target_path, &full_link).is_ok();
+                    if ok {
+                        progress = true;
+                    }
+                }
+            }
+        }
+        if !progress {
+            break;
+        }
+    }
+    Ok(())
+}
+
+#[cfg(not(windows))]
+fn restore_tarball_symlinks(_tarball: &Path, _dest: &Path) -> Result<()> {
+    Ok(())
 }
 
 fn find_extracted_sdk(extract_dir: &Path) -> Result<PathBuf> {
@@ -613,6 +840,13 @@ fn find_extracted_sdk(extract_dir: &Path) -> Result<PathBuf> {
 }
 
 fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<()> {
+    copy_dir_recursive_depth(src, dst, 0)
+}
+
+fn copy_dir_recursive_depth(src: &Path, dst: &Path, depth: usize) -> Result<()> {
+    if depth > 16 || dst.starts_with(src) || src == dst {
+        return Ok(());
+    }
     fs::create_dir_all(dst)?;
     for entry in fs::read_dir(src)? {
         let entry = entry?;
@@ -631,14 +865,32 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<()> {
             {
                 let target = fs::read_link(&src_path)?;
                 let _ = fs::remove_file(&dst_path);
-                if src_path.is_dir() {
-                    std::os::windows::fs::symlink_dir(&target, &dst_path)?;
+                let _ = fs::remove_dir_all(&dst_path);
+                let resolved = if target.is_relative() {
+                    src_path.parent().map(|p| p.join(&target)).unwrap_or_else(|| target.clone())
                 } else {
-                    std::os::windows::fs::symlink_file(&target, &dst_path)?;
+                    target.clone()
+                };
+                if src_path.is_dir() || resolved.is_dir() {
+                    let is_cycle = dst_path.starts_with(&resolved) || resolved.starts_with(&dst_path);
+                    if std::os::windows::fs::symlink_dir(&target, &dst_path).is_err()
+                        && !create_windows_junction(&dst_path, &resolved)
+                        && resolved.exists()
+                        && !is_cycle
+                    {
+                        copy_dir_recursive_depth(&resolved, &dst_path, depth + 1)?;
+                    }
+                } else {
+                    if std::os::windows::fs::symlink_file(&target, &dst_path).is_err()
+                        && fs::hard_link(&resolved, &dst_path).is_err()
+                        && resolved.exists()
+                    {
+                        fs::copy(&resolved, &dst_path)?;
+                    }
                 }
             }
         } else if file_type.is_dir() {
-            copy_dir_recursive(&src_path, &dst_path)?;
+            copy_dir_recursive_depth(&src_path, &dst_path, depth + 1)?;
         } else {
             let _ = fs::remove_file(&dst_path);
             fs::copy(&src_path, &dst_path)?;
