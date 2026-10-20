@@ -5,8 +5,7 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 
 use crate::builder::find_executable;
-use crate::container::{ContainerEngine, ContainerEngineKind};
-use crate::targets::{IMAGE_TARGETS, TargetInfo, current_host_triple};
+use crate::targets::{ALL_TARGETS, TargetInfo, current_host_triple};
 use crate::ui;
 
 struct Report {
@@ -96,7 +95,7 @@ pub fn run_doctor() {
             let v = version_of(&rune).unwrap_or_else(|| "rune".into());
             r.ok(format!(
                 "{v} builds {}",
-                ui::dim("(content-addressed cache shared with containers)")
+                ui::dim("(content-addressed cache)")
             ));
             if rune.to_string_lossy().contains("/target/debug/") {
                 r.problem(
@@ -110,7 +109,7 @@ pub fn run_doctor() {
             Some(cargo) => r.ok(format!(
                 "{} builds {}",
                 version_of(&cargo).unwrap_or_else(|| "cargo".into()),
-                ui::dim("(install Rune for its shared build cache)")
+                ui::dim("(install Rune for content-addressed build cache)")
             )),
             None => r.problem(
                 "neither rune nor cargo is on PATH",
@@ -161,24 +160,15 @@ pub fn run_doctor() {
         ));
     }
 
-    // Containers (optional fallback for custom Dockerfiles).
-    let mut engine_ok = None;
-    for kind in ContainerEngineKind::ALL {
-        let Some(path) = find_executable(kind.name()) else {
-            continue;
-        };
-        let engine = ContainerEngine { kind, path };
-        if engine.check_service_available() {
-            let v = version_of(&engine.path)
-                .map(|v| v.replace(" version ", " ").replace(',', ""))
-                .unwrap_or_else(|| kind.name().into());
-            r.ok(format!("{v} runs optional custom container images"));
-            engine_ok = Some(engine);
-            break;
+    // Clang / host C compiler for cross-linking driver
+    match find_executable("clang") {
+        Some(clang) => {
+            let v = version_of(&clang).unwrap_or_else(|| "clang".into());
+            r.ok(format!("{v} available as universal cross-linking driver"));
         }
-    }
-    if engine_ok.is_none() {
-        r.info("no container engine (not needed: hyprcross links natively via target SDKs)");
+        None => {
+            r.info("clang not found: native GCC cross-compilers or hyprlnk will be used");
+        }
     }
 
     // Emulators for tests.
@@ -201,7 +191,7 @@ pub fn run_doctor() {
     })
     .collect();
     if qemu.is_empty() {
-        r.info("no QEMU on this machine: direct-mode tests of other architectures need it; images have their own");
+        r.info("no QEMU on this machine: cross-architecture tests require QEMU or binfmt_misc");
     } else {
         let binfmt = Path::new("/proc/sys/fs/binfmt_misc/status").exists();
         r.ok(format!(
@@ -217,58 +207,19 @@ pub fn run_doctor() {
     }
 
     // C toolchains for direct builds.
-    let direct: Vec<String> = IMAGE_TARGETS
+    let direct: Vec<String> = ALL_TARGETS
         .iter()
         .map(|t| TargetInfo::parse(t))
         .filter(|t| !t.is_host() && !t.links_without_c_toolchain())
         .filter(|t| crate::direct::host_c_compiler(t).is_some())
         .map(|t| t.triple)
         .collect();
-    if direct.is_empty() {
-        r.info("no cross C compilers here: Linux, Windows and Android targets build in containers");
-    } else {
+    if !direct.is_empty() {
         r.ok(format!(
-            "{} build directly {}",
-            ui::plural(direct.len(), "target"),
+            "{} native host C cross-compilers found {}",
+            ui::plural(direct.len(), "toolchain"),
             ui::dim(format!("({})", direct.join(", ")))
         ));
-    }
-
-    // Images and warm containers.
-    if let Some(engine) = &engine_ok {
-        let config = crate::config::Config::load_from_dir(&cwd).unwrap_or_default();
-        let repo = config
-            .build
-            .image_repository
-            .trim_end_matches('/')
-            .to_string();
-        let images = Command::new(&engine.path)
-            .args(["images", "--format", "{{.Repository}}"])
-            .stderr(Stdio::null())
-            .output()
-            .map(|o| {
-                String::from_utf8_lossy(&o.stdout)
-                    .lines()
-                    .filter(|l| l.trim_start_matches("localhost/").starts_with(&repo))
-                    .count()
-            })
-            .unwrap_or(0);
-        r.info(format!(
-            "{} from {repo} on this machine {}",
-            ui::plural(images, "image"),
-            ui::dim("(pulled on first use)")
-        ));
-        if let Ok(list) = crate::daemon::list(engine) {
-            let running = list.iter().filter(|c| c.state == "running").count();
-            if !list.is_empty() {
-                r.info(format!(
-                    "{} warm, {} stopped {}",
-                    ui::plural(running, "container"),
-                    list.len() - running,
-                    ui::dim(format!("({})", crate::host::invocation("daemon status")))
-                ));
-            }
-        }
     }
 
     ui::err("");

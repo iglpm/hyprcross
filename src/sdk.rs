@@ -11,13 +11,13 @@ use crate::builder::find_executable;
 use crate::targets::{TargetEnv, TargetInfo, TargetOs};
 use crate::ui;
 
-pub const DEFAULT_SDK_REPO: &str = "https://github.com/runepm/sdks/releases/download/v2027.0.1";
-pub const FALLBACK_SDK_REPO: &str = "https://github.com/runepm/sdks/releases/download/v2027.0.0";
+pub const DEFAULT_SDK_REPO: &str = "https://github.com/runepm/sdks/releases/download/v2027.0.3";
+pub const FALLBACK_SDK_REPO: &str = "https://github.com/runepm/sdks/releases/download/v2027.0.2";
 
 pub const MACOS_SDK_PRIMARY_URL: &str =
-    "https://github.com/runepm/sdks/releases/download/v2027.0.1/MacOSX.sdk.tar.xz";
+    "https://github.com/runepm/sdks/releases/download/v2027.0.3/MacOSX.sdk.tar.xz";
 pub const MACOS_SDK_FALLBACK_URL: &str =
-    "https://github.com/joseluisq/macosx-sdks/releases/download/26.1/MacOSX26.1.sdk.tar.xz";
+    "https://github.com/runepm/sdks/releases/download/v2027.0.2/MacOSX.sdk.tar.xz";
 
 #[derive(Debug, Clone)]
 pub struct TargetSdkDef {

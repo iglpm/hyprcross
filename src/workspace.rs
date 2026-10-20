@@ -1,4 +1,4 @@
-//! The project on disk: which directories a container needs, and whether the toolchain has the
+//! The project on disk: the workspace structure, and whether the toolchain has the
 //! target's standard library, both found without running Cargo or rustup.
 
 use anyhow::Result;
@@ -68,7 +68,7 @@ fn path_values(val: &toml::Value, out: &mut Vec<String>) {
 }
 
 /// Directories outside `root` that the manifests in `root` and `cwd` point at with `path = …`
-/// (path dependencies, `[patch]` entries): containers need them mounted too.
+/// (path dependencies, `[patch]` entries).
 pub fn external_path_dependencies(root: &Path, cwd: &Path) -> Vec<PathBuf> {
     let root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
     let mut seen = HashSet::new();

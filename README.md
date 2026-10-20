@@ -2,30 +2,29 @@
 
 # hyprcross
 
-**Cross-compile and cross-test Rust, with Rune or Cargo.**
+**Cross-compile and cross-test Rust, natively with Rune or Cargo.**
 
-On the host when it can, in a warm container when it can't, linked with hyprlnk.
-A drop-in for `cross`: same `Cross.toml`, same commands.
+Directly on the host with target SDKs and sysroots, linked with hyprlnk.
+Zero containers, zero VM overhead, zero Docker required.
 
 [![CI](https://github.com/runepm/hyprcross/actions/workflows/ci.yml/badge.svg)](https://github.com/runepm/hyprcross/actions/workflows/ci.yml)
-[![Images](https://github.com/runepm/hyprcross/actions/workflows/images.yml/badge.svg)](https://github.com/runepm/hyprcross/actions/workflows/images.yml)
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](LICENSE-MIT.md)
 
 </div>
 
 ```console
 $ hyprcross test -t aarch64-unknown-linux-gnu
-▸ testing aarch64-unknown-linux-gnu · container · rune · hyprlnk
-✓ 1 passed · 1 test binary · 1.12s
+▸ testing aarch64-unknown-linux-gnu · direct · rune · hyprlnk
+✓ 1 passed · 1 test binary · 0.28s
 
 $ hyprcross build -t aarch64-unknown-linux-gnu
-▸ building aarch64-unknown-linux-gnu · container · rune · hyprlnk
+▸ building aarch64-unknown-linux-gnu · direct · rune · hyprlnk
 ✓ dev · 0 compiled · 94 cached · 0.03s
 ```
 
 ## What it does
 
-- **Builds on the host natively without Docker.** By default, hyprcross cross-compiles directly on
+- **Builds on the host natively without Docker.** hyprcross cross-compiles directly on
   the host using minimal SDK / sysroot packages and links natively with **hyprlnk**. You don't need
   Docker, Podman, or a container daemon installed. Missing SDKs are automatically downloaded on demand
   and cached locally in `~/.local/share/hyprcross/sdks/`.
@@ -37,9 +36,6 @@ $ hyprcross build -t aarch64-unknown-linux-gnu
   all projects.
 - **Manages SDKs directly.** Check status with `hyprcross sdk list`, pre-download toolchains with
   `hyprcross sdk install <target>`, or inspect paths with `hyprcross sdk path <target>`.
-- **Optional container fallback.** If a project relies on complex containerized build steps or custom
-  Dockerfiles (`--engine container` or configured `image`/`dockerfile` in `Hyprcross.toml`), hyprcross
-  keeps containers warm and communicates over a Unix socket agent for instant rebuilds.
 - **Runs Rune or Cargo.** Rune when installed, leveraging its content-addressed caching; Cargo otherwise.
 
 ## How fast
@@ -112,14 +108,9 @@ hyprcross sdk list                                       # list installed and av
 hyprcross sdk install aarch64-unknown-linux-gnu          # pre-install / pull target SDK
 hyprcross sdk path aarch64-unknown-linux-gnu             # show SDK directory
 hyprcross sdk remove aarch64-unknown-linux-gnu           # clean up cached SDK
-
-# Optional container engine (only if containers are requested)
-hyprcross daemon status                                  # the warm containers
-hyprcross images pull -t aarch64-unknown-linux-gnu       # pull container image
 ```
 
-`--engine direct|container` forces where a build runs (defaults to `direct`), `--builder rune|cargo` what runs it,
-`--linker default` keeps the target's own linker, `--no-daemon` uses a fresh container per build.
+`--builder rune|cargo` controls what runs the build, `--linker default` keeps the target's own linker.
 
 ## Configure
 
@@ -129,21 +120,13 @@ any directory above it; `hyprcross init` writes one.
 ```toml
 [build]
 default_target = "aarch64-unknown-linux-gnu"
+linker = "hyprlnk"
+builder = "auto"
 
 [target.aarch64-unknown-linux-gnu]
-# Libraries for the target, installed once when the warm container is created:
-pre_build = ["apt-get update && apt-get install -y libssl-dev:arm64"]
 env = { OPENSSL_STATIC = "1" }
 ```
 
-All settings: [docs/configuration.md](docs/configuration.md).
-
-## Images
-
-`ghcr.io/runepm/hyprcross/<target>`: Linux on glibc and musl for 12 architectures, Windows
-(MinGW-w64, with Wine), Android, FreeBSD, WASI (with Wasmtime) and bare-metal Arm. Rebuilt every
-week with the base system's updates and tested with hyprcross before they are pushed. See
-[docker/README.md](docker/README.md). Targets without an image fall back to cross-rs' images.
 
 ## Documentation
 

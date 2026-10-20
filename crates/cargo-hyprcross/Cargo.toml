@@ -18,5 +18,5 @@ name = "cargo-hyprcross"
 path = "src/main.rs"
 
 [dependencies]
-hyprcross = { version = "2027.0.0-rc.1", path = "../.." }
+hyprcross = { version = "2027.0.0-rc.2", path = "../.." }
 

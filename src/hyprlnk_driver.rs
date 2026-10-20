@@ -2,7 +2,7 @@
 //! here; Cargo gets this executable as the target's linker, under the name `hyprlnk`.
 //!
 //! The executable links instead of running the CLI when it is started
-//! - as `hyprlnk` (the name hyprcross gives it for Cargo, and in containers),
+//! - as `hyprlnk` (the name hyprcross gives it for Cargo),
 //! - as `ld` by the C compiler hyprlnk runs for a `cc` command line (`HYPRLNK_DRIVER` is set),
 //! - with `HYPRCROSS_HYPRLNK` set, or as `hyprcross __hyprlnk <args>`.
 

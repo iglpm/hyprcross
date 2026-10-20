@@ -1,6 +1,6 @@
 /target
 /.rune/
-/Rune.lock.bin
+Rune.lock.bin
 **/*.rs.bk
 *.orig
 .DS_Store

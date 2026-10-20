@@ -10,10 +10,7 @@ const SECTIONS: &[(&str, &[&str])] = &[
             "build", "check", "test", "run", "bench", "clippy", "doc", "clean",
         ],
     ),
-    (
-        "Targets and SDKs",
-        &["targets", "sdk", "doctor", "daemon", "images", "init"],
-    ),
+    ("Targets and SDKs", &["targets", "sdk", "doctor", "init"]),
 ];
 
 /// Handle `hyprcross`, `-h`, `--help`, `help` and `help <command>`; whether it did.
@@ -146,13 +143,8 @@ fn overview() {
             "-t, --target <triple>",
             "Target to build for (else the default target)",
         ),
-        ("--engine <engine>", "auto, direct or container"),
         ("--builder <tool>", "auto, rune or cargo"),
         ("--linker <linker>", "hyprlnk or default"),
-        (
-            "--no-daemon",
-            "Fresh container per build instead of a warm one",
-        ),
         ("-q, --quiet", "Only print errors"),
         ("-v, --verbose", "Print the commands it runs"),
         ("--color <when>", "auto, always or never"),

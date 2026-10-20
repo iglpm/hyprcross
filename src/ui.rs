@@ -275,7 +275,7 @@ fn spinner_style() -> ProgressStyle {
         .expect("valid template")
 }
 
-/// A spinner for work that takes a moment (starting a container, pulling an image); on a
+/// A spinner for work that takes a moment (downloading an SDK, unpacking sysroots); on a
 /// terminal only. `finish` replaces it with a `▸` line saying how long it took.
 pub struct Activity {
     bar: Option<ProgressBar>,
@@ -338,6 +338,20 @@ impl Drop for Activity {
     }
 }
 
+pub fn bar_width() -> usize {
+    (term_width().saturating_sub(40) / 2).clamp(8, 24)
+}
+
+pub fn bar_style(width: usize) -> ProgressStyle {
+    ProgressStyle::default_bar()
+        .template(&format!(
+            "{{spinner:.141}} {{prefix:.141.bold}} {{bar:{width}.141/238}} {{pos}}/{{len}} {{wide_msg:.dim}}"
+        ))
+        .expect("valid template")
+        .tick_chars("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏ ")
+        .progress_chars("━╾─")
+}
+
 /// A custom progress bar for image downloads (pulls), showing progress bars, layer status,
 /// and timing without raw engine logs.
 pub struct PullProgress {
@@ -352,13 +366,8 @@ impl PullProgress {
         action("pulling", image);
         let bar = is_term.then(|| {
             let pb = ProgressBar::new(100);
-            pb.set_style(
-                ProgressStyle::default_bar()
-                    .template("{prefix:.141.bold} [{bar:24.141/dim}] {wide_msg:.dim}")
-                    .unwrap_or_else(|_| ProgressStyle::default_bar())
-                    .progress_chars("━╸─"),
-            );
-            pb.set_prefix(format!("{} {}", brand("▸"), brand("pulling")));
+            pb.set_style(bar_style(bar_width()));
+            pb.set_prefix("pulling");
             pb.set_message("connecting...");
             pb.enable_steady_tick(Duration::from_millis(80));
             pb

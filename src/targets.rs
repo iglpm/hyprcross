@@ -38,7 +38,7 @@ pub const IMAGE_TARGETS: &[&str] = &[
     "thumbv7em-none-eabihf",
 ];
 
-/// All first-class targets supported by hyprcross (both via container images and direct host execution).
+/// All first-class targets supported natively by hyprcross.
 pub const ALL_TARGETS: &[&str] = &[
     "x86_64-unknown-linux-gnu",
     "i686-unknown-linux-gnu",
@@ -264,45 +264,6 @@ impl TargetInfo {
         self.triple == current_host_triple()
     }
 
-    /// Whether hyprcross publishes an image for this target.
-    pub fn has_hyprcross_image(&self) -> bool {
-        IMAGE_TARGETS.contains(&self.triple.as_str())
-    }
-
-    /// This target's image in `repository`, if hyprcross publishes one.
-    pub fn image(&self, repository: &str, tag: &str) -> Option<String> {
-        self.has_hyprcross_image()
-            .then(|| format!("{}/{}:{tag}", repository.trim_end_matches('/'), self.triple))
-    }
-
-    /// cross-rs' image for this target: where hyprcross falls back to for targets it has no image
-    /// of its own for, or when its own can't be pulled.
-    pub fn cross_rs_image(&self) -> Option<String> {
-        let published = match self.os {
-            TargetOs::Linux | TargetOs::Android | TargetOs::FreeBsd => true,
-            TargetOs::Windows => self.env == TargetEnv::Gnu,
-            TargetOs::None => self.triple.starts_with("thumb"),
-            _ => false,
-        };
-        published.then(|| format!("ghcr.io/cross-rs/{}:edge", self.triple))
-    }
-
-    pub fn has_prebuilt_image(&self) -> bool {
-        self.has_hyprcross_image() || self.cross_rs_image().is_some()
-    }
-
-    /// The open target to use in a container instead, for one whose SDK can't be redistributed.
-    pub fn suggested_alternative(&self) -> Option<String> {
-        if self.env != TargetEnv::Msvc {
-            return None;
-        }
-        match self.arch {
-            TargetArch::X86_64 => Some("x86_64-pc-windows-gnu".to_string()),
-            TargetArch::X86 => Some("i686-pc-windows-gnu".to_string()),
-            _ => None,
-        }
-    }
-
     /// The GNU-style prefix of this target's C toolchain (`aarch64-linux-gnu`, `x86_64-w64-mingw32`).
     pub fn tool_prefix(&self) -> Option<String> {
         let arch = self.triple.split('-').next()?;
@@ -396,20 +357,6 @@ impl TargetInfo {
         }
     }
 
-    /// What runs this target's programs in its hyprcross image.
-    pub fn image_runner(&self) -> Runner {
-        if !self.has_hyprcross_image() {
-            return Runner::None;
-        }
-        match self.os {
-            TargetOs::Linux if self.arch == TargetArch::X86_64 => Runner::Native,
-            TargetOs::Linux => qemu_arch(&self.arch).map_or(Runner::None, Runner::Qemu),
-            TargetOs::Windows => Runner::Wine,
-            TargetOs::Wasi => Runner::Wasmtime,
-            _ => Runner::None,
-        }
-    }
-
     pub fn arch_matches_host(&self) -> bool {
         let host = current_host_triple();
         host.split('-').next() == self.triple.split('-').next()
@@ -468,6 +415,16 @@ impl TargetInfo {
         }
 
         false
+    }
+
+    /// Whether LLVM's `ld.lld` supports linking this target architecture.
+    /// Specifically, SPARC64 (unsupported relocations) and PowerPC 64-bit big-endian ELFv1
+    /// are not supported by ld.lld.
+    pub fn lld_supported(&self) -> bool {
+        !matches!(
+            self.triple.as_str(),
+            "sparc64-unknown-linux-gnu" | "powerpc64-unknown-linux-gnu"
+        )
     }
 
     pub fn display_name(&self) -> &str {
@@ -538,12 +495,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn image_targets_are_unique_and_parse() {
+    fn targets_are_unique_and_parse() {
         let mut seen = std::collections::HashSet::new();
-        for t in IMAGE_TARGETS {
+        for t in ALL_TARGETS {
             assert!(seen.insert(t), "{t} listed twice");
             let info = TargetInfo::parse(t);
-            assert!(info.has_hyprcross_image());
             assert!(
                 !matches!(info.os, TargetOs::Other(_)),
                 "{t}: unknown operating system"
@@ -575,36 +531,25 @@ mod tests {
     }
 
     #[test]
-    fn images_come_from_the_repository_given() {
-        let t = TargetInfo::parse("aarch64-unknown-linux-gnu");
-        assert_eq!(
-            t.image("ghcr.io/me/imgs/", "v1").as_deref(),
-            Some("ghcr.io/me/imgs/aarch64-unknown-linux-gnu:v1")
-        );
-        let none = TargetInfo::parse("mips-unknown-linux-gnu");
-        assert_eq!(
-            none.image(DEFAULT_IMAGE_REPOSITORY, DEFAULT_IMAGE_TAG),
-            None
-        );
-        assert!(none.cross_rs_image().is_some(), "cross-rs is the fallback");
-    }
-
-    #[test]
     fn runners() {
         assert_eq!(
-            TargetInfo::parse("aarch64-unknown-linux-gnu").image_runner(),
-            Runner::Qemu("aarch64")
+            TargetInfo::parse("aarch64-unknown-linux-gnu").host_runner(),
+            if current_host_triple() == "aarch64-unknown-linux-gnu" {
+                Runner::Native
+            } else {
+                Runner::Qemu("aarch64")
+            }
         );
         assert_eq!(
-            TargetInfo::parse("x86_64-pc-windows-gnu").image_runner(),
+            TargetInfo::parse("x86_64-pc-windows-gnu").host_runner(),
             Runner::Wine
         );
         assert_eq!(
-            TargetInfo::parse("wasm32-wasip1").image_runner(),
+            TargetInfo::parse("wasm32-wasip1").host_runner(),
             Runner::Wasmtime
         );
         assert_eq!(
-            TargetInfo::parse("aarch64-linux-android").image_runner(),
+            TargetInfo::parse("aarch64-linux-android").host_runner(),
             Runner::None
         );
     }

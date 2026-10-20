@@ -249,7 +249,9 @@ impl<'a> DirectEngine<'a> {
 
         if fallback_clang.is_some() {
             rustc_flags.push(format!("-C link-arg=--target={clang_target}"));
-            rustc_flags.push("-C link-arg=-fuse-ld=lld".to_string());
+            if self.target.lld_supported() {
+                rustc_flags.push("-C link-arg=-fuse-ld=lld".to_string());
+            }
         }
         if !rustc_flags.is_empty() {
             let flag = rustc_flags.join(" ");

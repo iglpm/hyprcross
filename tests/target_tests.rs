@@ -1,4 +1,4 @@
-use hyprcross::targets::{IMAGE_TARGETS, TargetArch, TargetInfo, TargetOs};
+use hyprcross::targets::{TargetArch, TargetInfo, TargetOs};
 
 #[test]
 fn test_all_primary_targets() {
@@ -94,37 +94,10 @@ fn test_qemu_mapping() {
     assert_eq!(q("x86_64-pc-windows-gnu"), None);
 }
 
-#[test]
-fn test_prebuilt_image_support() {
-    let linux_gnu = TargetInfo::parse("aarch64-unknown-linux-gnu");
-    assert!(linux_gnu.has_prebuilt_image());
-    assert_eq!(linux_gnu.target_c_compiler(), Some("aarch64-linux-gnu-gcc"));
-
-    let win_msvc = TargetInfo::parse("i686-pc-windows-msvc");
-    assert!(!win_msvc.has_prebuilt_image());
-    assert_eq!(
-        win_msvc.suggested_alternative(),
-        Some("i686-pc-windows-gnu".to_string())
-    );
-
-    let win_msvc64 = TargetInfo::parse("x86_64-pc-windows-msvc");
-    assert!(!win_msvc64.has_prebuilt_image());
-    assert_eq!(
-        win_msvc64.suggested_alternative(),
-        Some("x86_64-pc-windows-gnu".to_string())
-    );
-
-    let win_gnu = TargetInfo::parse("x86_64-pc-windows-gnu");
-    assert!(win_gnu.has_prebuilt_image());
-    assert_eq!(win_gnu.target_c_compiler(), Some("x86_64-w64-mingw32-gcc"));
-
-    assert!(!TargetInfo::parse("aarch64-apple-darwin").has_prebuilt_image());
-}
-
-/// Every target in `IMAGE_TARGETS` has an SDK definition in `KNOWN_SDKS` or links without a C toolchain.
+/// Every target in `ALL_TARGETS` has an SDK definition in `KNOWN_SDKS` or links without a C toolchain.
 #[test]
 fn every_target_has_sdk_support() {
-    for target in IMAGE_TARGETS {
+    for target in hyprcross::targets::ALL_TARGETS {
         let info = TargetInfo::parse(target);
         if info.links_without_c_toolchain() {
             continue;

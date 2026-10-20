@@ -18,7 +18,10 @@ fn test_target_info_parsing() {
 
     let t_musl = TargetInfo::parse("x86_64-unknown-linux-musl");
     assert_eq!(t_musl.arch, TargetArch::X86_64);
-    assert!(t_musl.has_hyprcross_image());
+    assert_eq!(t_musl.env, hyprcross::targets::TargetEnv::Musl);
+    assert!(hyprcross::sdk::target_needs_sdk(&TargetInfo::parse(
+        "aarch64-unknown-linux-musl"
+    )));
 
     assert_eq!(
         TargetInfo::parse("x86_64-pc-windows-msvc").os,
@@ -86,7 +89,7 @@ fn help_lists_the_commands() {
         .unwrap();
     assert!(out.status.success());
     let text = String::from_utf8_lossy(&out.stdout);
-    for word in ["build", "test", "targets", "doctor", "daemon", "images"] {
+    for word in ["build", "test", "targets", "doctor", "sdk", "init"] {
         assert!(text.contains(word), "{word} missing from:\n{text}");
     }
 }
@@ -119,7 +122,7 @@ fn a_build_without_a_target_says_how_to_give_one() {
 }
 
 #[test]
-fn targets_lists_every_image() {
+fn targets_lists_every_target() {
     let out = hyprcross()
         .arg("targets")
         .env("NO_COLOR", "1")
@@ -127,7 +130,7 @@ fn targets_lists_every_image() {
         .unwrap();
     assert!(out.status.success());
     let text = String::from_utf8_lossy(&out.stdout);
-    for t in hyprcross::targets::IMAGE_TARGETS {
+    for t in hyprcross::targets::ALL_TARGETS {
         assert!(text.contains(t), "{t} missing");
     }
 }
