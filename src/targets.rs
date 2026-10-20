@@ -346,7 +346,11 @@ impl TargetInfo {
 
     /// What runs this target's programs, here on the host.
     pub fn host_runner(&self) -> Runner {
-        if self.is_host() || (self.env == TargetEnv::Musl && self.arch_matches_host()) {
+        if self.is_host()
+            || (cfg!(target_os = "linux")
+                && self.env == TargetEnv::Musl
+                && self.arch_matches_host())
+        {
             return Runner::Native;
         }
         match self.os {

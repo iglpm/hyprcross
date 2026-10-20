@@ -104,7 +104,9 @@ impl<'a> DirectEngine<'a> {
         };
 
         if let Some(sdk) = &maybe_sdk {
-            cmd.env("SDKROOT", sdk);
+            if self.target.os == crate::targets::TargetOs::MacOS {
+                cmd.env("SDKROOT", sdk);
+            }
             cmd.env("HYPRCROSS_SDK_PATH", sdk);
             let sdk_key = format!("HYPRCROSS_SDK_PATH_{key}");
             cmd.env(sdk_key, sdk);

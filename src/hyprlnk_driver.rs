@@ -72,7 +72,9 @@ pub fn rustc_linker_flavor(triple: &str) -> Option<&'static str> {
     {
         if triple.contains("-apple-") {
             Some("ld64.lld")
-        } else if cfg!(not(unix)) && (triple.contains("-linux-") || triple.contains("-freebsd")) {
+        } else if (cfg!(target_os = "macos") || cfg!(not(unix)))
+            && (triple.contains("-linux-") || triple.contains("-freebsd"))
+        {
             Some("ld.lld")
         } else {
             None
@@ -181,9 +183,9 @@ mod tests {
             rustc_linker_flavor("aarch64-apple-darwin"),
             Some("ld64.lld")
         );
-        #[cfg(unix)]
+        #[cfg(all(unix, not(target_os = "macos")))]
         assert_eq!(rustc_linker_flavor("aarch64-unknown-linux-gnu"), None);
-        #[cfg(not(unix))]
+        #[cfg(any(not(unix), target_os = "macos"))]
         assert_eq!(
             rustc_linker_flavor("aarch64-unknown-linux-gnu"),
             Some("ld.lld")

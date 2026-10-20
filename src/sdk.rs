@@ -598,11 +598,10 @@ fn download_file(url: &str, dest: &Path) -> Result<()> {
 
 fn extract_tarball(tarball: &Path, dest: &Path) -> Result<()> {
     if find_executable("tar").is_some() {
-        #[cfg(windows)]
+        #[cfg(any(windows, target_os = "macos"))]
         {
-            // On Windows, bsdtar fails with exit code 1 when creating symlinks without elevation.
-            // Furthermore, clobbering case-variant symlinks (e.g. kernel32.lib -> kernel32.Lib)
-            // will delete the real file on case-insensitive filesystems.
+            // On Windows and macOS (APFS case-insensitive by default), bsdtar can fail when creating
+            // symlinks or clobbering case-variant symlinks (e.g. kernel32.lib -> kernel32.Lib).
             // Exclude symlinks during tar extraction; restore_tarball_symlinks will recreate them safely.
             let list_out = Command::new("tar").args(["-tvf"]).arg(tarball).output();
             let mut exclude_file: Option<tempfile::NamedTempFile> = None;
@@ -648,24 +647,7 @@ fn extract_tarball(tarball: &Path, dest: &Path) -> Result<()> {
             bail!("tar exited with code {:?}: {}", output.status.code(), stderr.trim());
         }
 
-        #[cfg(not(unix))]
-        #[cfg(not(windows))]
-        {
-            let output = Command::new("tar")
-                .args(["-xf"])
-                .arg(tarball)
-                .args(["-C"])
-                .arg(dest)
-                .output()
-                .context("failed to invoke tar")?;
-            if output.status.success() {
-                return Ok(());
-            }
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            bail!("tar exited with code {:?}: {}", output.status.code(), stderr.trim());
-        }
-
-        #[cfg(unix)]
+        #[cfg(not(any(windows, target_os = "macos")))]
         {
             let output = Command::new("tar")
                 .args(["-xf"])
@@ -693,7 +675,7 @@ fn create_windows_junction(link: &Path, target: &Path) -> bool {
         .is_ok_and(|out| out.status.success())
 }
 
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "macos"))]
 fn restore_tarball_symlinks(tarball: &Path, dest: &Path) -> Result<()> {
     if find_executable("tar").is_none() {
         return Ok(());
@@ -788,14 +770,23 @@ fn restore_tarball_symlinks(tarball: &Path, dest: &Path) -> Result<()> {
                 }
                 if target_path.is_dir() {
                     let is_cycle = full_link.starts_with(&target_path) || target_path.starts_with(&full_link);
+                    #[cfg(windows)]
                     let ok = std::os::windows::fs::symlink_dir(&target_path, &full_link).is_ok()
                         || create_windows_junction(&full_link, &target_path)
+                        || (!is_cycle && copy_dir_recursive(&target_path, &full_link).is_ok());
+                    #[cfg(not(windows))]
+                    let ok = std::os::unix::fs::symlink(&target_path, &full_link).is_ok()
                         || (!is_cycle && copy_dir_recursive(&target_path, &full_link).is_ok());
                     if ok {
                         progress = true;
                     }
                 } else if target_path.is_file() {
+                    #[cfg(windows)]
                     let ok = std::os::windows::fs::symlink_file(&target_path, &full_link).is_ok()
+                        || fs::hard_link(&target_path, &full_link).is_ok()
+                        || fs::copy(&target_path, &full_link).is_ok();
+                    #[cfg(not(windows))]
+                    let ok = std::os::unix::fs::symlink(&target_path, &full_link).is_ok()
                         || fs::hard_link(&target_path, &full_link).is_ok()
                         || fs::copy(&target_path, &full_link).is_ok();
                     if ok {
@@ -811,7 +802,7 @@ fn restore_tarball_symlinks(tarball: &Path, dest: &Path) -> Result<()> {
     Ok(())
 }
 
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "macos")))]
 fn restore_tarball_symlinks(_tarball: &Path, _dest: &Path) -> Result<()> {
     Ok(())
 }
