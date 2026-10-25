@@ -2,7 +2,7 @@
 
 # hyprcross
 
-**Cross-compile and cross-test Rust, natively with Rune or Cargo.**
+**Cross-compile and cross-test Rust, natively with Igel or Cargo.**
 
 Directly on the host with target SDKs and sysroots, linked with hyprlnk.
 Zero containers, zero VM overhead, zero Docker required.
@@ -14,11 +14,11 @@ Zero containers, zero VM overhead, zero Docker required.
 
 ```console
 $ hyprcross test -t aarch64-unknown-linux-gnu
-▸ testing aarch64-unknown-linux-gnu · direct · rune · hyprlnk
+▸ testing aarch64-unknown-linux-gnu · direct · igl · hyprlnk
 ✓ 1 passed · 1 test binary · 0.28s
 
 $ hyprcross build -t aarch64-unknown-linux-gnu
-▸ building aarch64-unknown-linux-gnu · direct · rune · hyprlnk
+▸ building aarch64-unknown-linux-gnu · direct · igl · hyprlnk
 ✓ dev · 0 compiled · 94 cached · 0.03s
 ```
 
@@ -36,31 +36,29 @@ $ hyprcross build -t aarch64-unknown-linux-gnu
   all projects.
 - **Manages SDKs directly.** Check status with `hyprcross sdk list`, pre-download toolchains with
   `hyprcross sdk install <target>`, or inspect paths with `hyprcross sdk path <target>`.
-- **Runs Rune or Cargo.** Rune when installed, leveraging its content-addressed caching; Cargo otherwise.
+- **Runs Igel or Cargo.** Igel when installed, leveraging its content-addressed caching; Cargo otherwise.
 
 ## How fast
 
-A fully cached build of hyprcross itself (`build` with nothing to do), Rune 2027.0 and
-hyprcross release builds, Podman 6.1, Intel i5-10400F, median of 15 runs:
+A fully cached build of hyprcross itself (`build` with nothing to do), Cargo and hyprcross
+release builds, Intel i5-10400F, median of 15 runs:
 
 | | Time |
 | :--- | ---: |
-| `rune build`, host target, without hyprcross | 39 ms |
-| `hyprcross build`, host target | 40 ms |
-| `hyprcross build -t aarch64-unknown-linux-gnu`, warm container | **41 ms** |
-| the same through `podman exec`, as hyprcross 0.1 did | 149 ms |
+| `cargo build`, host target, without hyprcross | 60.469 ms |
+| `hyprcross build`, Cargo, host target | 61.664 ms |
+| `hyprcross build`, Cargo, AArch64 Linux SDK | **62.088 ms** |
+| `hyprcross --version` | 0.765 ms |
 
-Before this release a cached build in a container took over 1.5 s: Rune copied and re-hashed
-every artifact on each build there, because its cache can't hard-link across the container's
-mounts.
+The direct SDK path adds about 1.6 ms to this warm cross build.
 
 How it's measured, and what changed: [docs/performance.md](docs/performance.md).
 
 ## Install
 
-**With Rune, there is nothing to install:** hyprcross is built into it, as `rune cross` and
-`rune build --cross <target>` (see Rune's
-[cross-compilation guide](https://github.com/runepm/rune/blob/master/docs/cross-compilation.md)).
+**With Igel, there is nothing to install:** hyprcross is built into it, as `igl cross` and
+`igl build --cross <target>` (see Igel's
+[cross-compilation guide](https://github.com/runepm/igel/blob/master/docs/cross-compilation.md)).
 
 ### From Crates.io (Cargo)
 
@@ -90,7 +88,7 @@ This provides both `hyprcross` and `cargo-hyprcross` (for `cargo hyprcross …`)
 
 ```sh
 hyprcross doctor     # what this machine has for cross-compiling
-hyprcross targets    # the targets with images, and how each builds here
+hyprcross targets    # supported targets and how each builds here
 ```
 
 ## Use
@@ -110,7 +108,7 @@ hyprcross sdk path aarch64-unknown-linux-gnu             # show SDK directory
 hyprcross sdk remove aarch64-unknown-linux-gnu           # clean up cached SDK
 ```
 
-`--builder rune|cargo` controls what runs the build, `--linker default` keeps the target's own linker.
+`--builder igl|cargo` controls what runs the build, `--linker default` keeps the target's own linker.
 
 ## Configure
 
@@ -133,10 +131,9 @@ env = { OPENSSL_STATIC = "1" }
 | Guide | |
 | :--- | :--- |
 | [Getting started](docs/getting-started.md) | Installation and the first cross build |
-| [Architecture](docs/architecture.md) | Direct builds, warm containers and the agent |
+| [Architecture](docs/architecture.md) | Direct SDK builds and runners |
 | [Configuration](docs/configuration.md) | `Hyprcross.toml`, `Cross.toml` and environment variables |
 | [Targets](docs/targets.md) | What builds where, and what runs the tests |
-| [Images](docker/README.md) | The per-target images and how they are maintained |
 | [hyprlnk](docs/hyprlnk-integration.md) | How builds are linked |
 | [Testing with QEMU](docs/qemu-testing.md) | Running tests of other architectures |
 | [Performance](docs/performance.md) | Measurements and method |

@@ -1,13 +1,13 @@
 # hyprlnk
 
-[hyprlnk](https://github.com/runepm/hyprlnk) is the linker built into Rune and hyprcross. It
+[hyprlnk](https://github.com/runepm/hyprlnk) is the linker built into Igel and hyprcross. It
 links Linux ELF (x86-64, x86, AArch64, ARM from ARMv5TE, RISC-V 64, POWER little-endian, s390x
 and LoongArch64; glibc and musl), Windows PE/COFF (x64, ARM64, x86, with PDBs) and macOS Mach-O
 (arm64, arm64e, x86_64, with code signatures). Other targets keep their own linker.
 
 ## How fast
 
-Linking Rune's own debug build on Linux x86-64 (Intel i5-10400F, outputs on tmpfs, median of 11):
+Linking Igel's own debug build on Linux x86-64 (Intel i5-10400F, outputs on tmpfs, median of 11):
 
 | Linker | Time |
 | :--- | ---: |
@@ -21,15 +21,15 @@ before exiting.
 
 ## How hyprcross uses it
 
-### With Rune
+### With Igel
 
-Rune links with its built-in hyprlnk by itself (`build.linker = "hyprlnk"`, its default).
-hyprcross adds nothing to the build, so Rune's cache is the same whether a build runs through
-hyprcross or not. `--linker default` passes `--config build.linker="default"` to Rune.
+Igel links with its built-in hyprlnk by itself (`build.linker = "hyprlnk"`, its default).
+hyprcross adds nothing to the build, so Igel's cache is the same whether a build runs through
+hyprcross or not. `--linker default` passes `--config build.linker="default"` to Igel.
 
 On Linux hyprlnk links through a C compiler, which knows where the target's C runtime and
-system libraries are. Rune takes that compiler from the target's configured linker:
-`CARGO_TARGET_<TRIPLE>_LINKER`, which every image sets (`aarch64-linux-gnu-gcc`,
+system libraries are. Igel takes that compiler from the target's configured linker:
+`CARGO_TARGET_<TRIPLE>_LINKER`, for example to a target compiler (`aarch64-linux-gnu-gcc`,
 `aarch64-linux-musl-gcc`, …) and which hyprcross sets in direct mode when it finds the target's
 C cross compiler.
 
@@ -40,7 +40,6 @@ the name `hyprlnk`, and `HYPRLNK_CC` names the C compiler to link through:
 
 - on the host, `~/.cache/hyprcross/bin/hyprlnk`, a link to the hyprcross executable (its path
   stays the same when hyprcross is updated, so Cargo doesn't rebuild);
-- in containers, `/opt/hyprcross/bin/hyprlnk`, hyprcross mounted under that name.
 
 Run as `hyprlnk`, as `ld` by the C compiler hyprlnk drives, with `HYPRCROSS_HYPRLNK` set, or as
 `hyprcross __hyprlnk <args>`, the executable links instead of starting the CLI. A standalone
