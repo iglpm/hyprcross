@@ -255,7 +255,7 @@ mod tests {
 
     #[test]
     fn excluded_packages_are_projects_of_their_own() {
-        // hyprcross inside the Rune repository: under its directory, but excluded.
+        // hyprcross inside the Igel repository: under its directory, but excluded.
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
         write(

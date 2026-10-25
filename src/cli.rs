@@ -30,7 +30,7 @@ const TEST_EXAMPLES: &[(&str, &str)] = &[
     name = "hyprcross",
     bin_name = "hyprcross",
     version,
-    about = "Cross-compile and cross-test Rust natively, with Rune or Cargo",
+    about = "Cross-compile and cross-test Rust natively, with Igel or Cargo",
     styles = crate::help::styles(),
     disable_help_subcommand = true
 )]
@@ -55,7 +55,7 @@ pub struct Cli {
     pub verbose: bool,
 }
 
-/// The command line, named after the host (`hyprcross`, or `rune cross`).
+/// The command line, named after the host (`hyprcross`, or `igl cross`).
 pub fn command() -> clap::Command {
     use clap::CommandFactory;
     let name = crate::host::command();
@@ -126,7 +126,7 @@ pub struct SharedBuildOpts {
     #[arg(long, env = "HYPRCROSS_LINKER", value_name = "LINKER")]
     pub linker: Option<String>,
 
-    /// Build tool: auto, rune or cargo
+    /// Build tool: auto, igl or cargo
     #[arg(long, env = "HYPRCROSS_BUILDER", value_name = "TOOL")]
     pub builder: Option<String>,
 }
@@ -136,7 +136,7 @@ pub struct CommonArgs {
     #[command(flatten)]
     pub opts: SharedBuildOpts,
 
-    /// Arguments for rune or cargo (`--release`, `-p app`, …)
+    /// Arguments for igl or cargo (`--release`, `-p app`, …)
     #[arg(
         trailing_var_arg = true,
         allow_hyphen_values = true,
@@ -150,7 +150,7 @@ pub struct CleanArgs {
     #[command(flatten)]
     pub opts: SharedBuildOpts,
 
-    /// Arguments for `rune clean` or `cargo clean`
+    /// Arguments for `igl clean` or `cargo clean`
     #[arg(
         trailing_var_arg = true,
         allow_hyphen_values = true,

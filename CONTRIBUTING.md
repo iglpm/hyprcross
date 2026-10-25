@@ -10,12 +10,12 @@ Please read our [Code of Conduct](CODE_OF_CONDUCT.md) before participating.
 
 ## Developing Hyprcross
 
-Hyprcross is written in modern Rust (2024 edition). It can be developed standalone or inside the [Rune](https://github.com/runepm/rune) ecosystem workspace.
+Hyprcross is written in modern Rust (2024 edition). It can be developed standalone or inside the [Igel](https://github.com/runepm/igel) ecosystem workspace.
 
 ### Prerequisites
 
 - A current Rust toolchain (`rustup`)
-- Either `rune` or `cargo`
+- Either `igl` or `cargo`
 - (Optional, for container testing) `docker` or `podman`
 - (Optional, for emulation testing) `qemu-user-static`
 
@@ -34,9 +34,9 @@ cargo run -- doctor
 ```
 
 To build against another hyprlnk commit, check it out in `hyprlnk/` and commit the submodule
-change (`git add hyprlnk`); Dependabot proposes newer ones weekly. In the Rune repository,
-hyprcross is a project of its own (excluded from Rune's workspace) with its own copy of hyprlnk:
-`git submodule update --init --recursive` there fetches it, and hyprlnk changes made in Rune's
+change (`git add hyprlnk`); Dependabot proposes newer ones weekly. In the Igel repository,
+hyprcross is a project of its own (excluded from Igel's workspace) with its own copy of hyprlnk:
+`git submodule update --init --recursive` there fetches it, and hyprlnk changes made in Igel's
 `hyprlnk/` reach hyprcross once they are committed, pushed and checked out in
 `hyprcross/hyprlnk/`.
 
@@ -50,7 +50,7 @@ and smoke-tested; see [docker/README.md](docker/README.md) for doing that locall
 ## Architecture Tour
 
 - **`src/lib.rs`**: Entry point: reads the command line, loads configuration, picks the target, and hands the build to the engine.
-- **`src/cli.rs`**, **`src/help.rs`**, **`src/ui.rs`**: Commands and options (`clap`), the grouped help, and output in Rune's style.
+- **`src/cli.rs`**, **`src/help.rs`**, **`src/ui.rs`**: Commands and options (`clap`), the grouped help, and output in Igel's style.
 - **`src/config.rs`**: `Hyprcross.toml`, `Cross.toml` and `[package.metadata.*]`, found from the current directory upwards.
 - **`src/targets.rs`**: Target triples: their toolchain, image, runner, and whether the host can build them.
 - **`src/engine.rs`**: Where a build runs (host or container) and running it there.
@@ -58,7 +58,7 @@ and smoke-tested; see [docker/README.md](docker/README.md) for doing that locall
 - **`src/container.rs`**, **`src/workspace.rs`**: Container engines, images, and the mounts a build needs (workspace root, path dependencies, toolchain and caches at their host paths).
 - **`src/daemon.rs`**, **`src/agent.rs`**: Warm containers, and the agent inside them that runs builds sent over a Unix socket.
 - **`src/hyprlnk_driver.rs`**: hyprlnk built in, as the linker for Cargo builds.
-- **`src/builder.rs`**: Rune or Cargo, and the options each gets.
+- **`src/builder.rs`**: Igel or Cargo, and the options each gets.
 - **`src/doctor.rs`**: `hyprcross doctor`.
 - **`docker/`**: The per-target images, their scripts and the smoke test CI runs in each.
 - **`docs/`**: Documentation, synced to the GitHub Wiki on push (public repository only).

@@ -1,4 +1,4 @@
-//! The build tool hyprcross drives: Rune when it is installed, Cargo otherwise.
+//! The build tool hyprcross drives: Igel when it is installed, Cargo otherwise.
 
 use anyhow::{Result, bail};
 use std::path::{Path, PathBuf};
@@ -6,14 +6,14 @@ use std::process::Command;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BuilderKind {
-    Rune,
+    Igel,
     Cargo,
 }
 
 impl BuilderKind {
     pub fn name(&self) -> &'static str {
         match self {
-            BuilderKind::Rune => "rune",
+            BuilderKind::Igel => "igl",
             BuilderKind::Cargo => "cargo",
         }
     }
@@ -26,28 +26,28 @@ pub struct Builder {
 }
 
 impl Builder {
-    /// `auto` is Rune when it is on PATH, else Cargo; inside Rune (`rune cross`), `auto` and
-    /// `rune` are that Rune.
+    /// `auto` is Igel when it is on PATH, else Cargo; inside Igel (`igl cross`), `auto` and
+    /// `igl` are that Igel.
     pub fn resolve(preference: &str) -> Result<Self> {
         if let Some(own) = &crate::host::get().builder
-            && matches!(preference, "auto" | "" | "rune")
+            && matches!(preference, "auto" | "" | "igl")
         {
             return Ok(own.clone());
         }
         let found =
             |kind: BuilderKind| find_executable(kind.name()).map(|path| Self { kind, path });
         match preference {
-            "rune" => found(BuilderKind::Rune).ok_or_else(|| {
-                anyhow::anyhow!("`rune` was chosen as the builder, but it is not on PATH")
+            "igl" => found(BuilderKind::Igel).ok_or_else(|| {
+                anyhow::anyhow!("`igl` was chosen as the builder, but it is not on PATH")
             }),
             "cargo" => {
                 found(BuilderKind::Cargo).ok_or_else(|| anyhow::anyhow!("`cargo` is not on PATH"))
             }
-            "auto" | "" => match found(BuilderKind::Rune).or_else(|| found(BuilderKind::Cargo)) {
+            "auto" | "" => match found(BuilderKind::Igel).or_else(|| found(BuilderKind::Cargo)) {
                 Some(b) => Ok(b),
-                None => bail!("neither `rune` nor `cargo` is on PATH"),
+                None => bail!("neither `igl` nor `cargo` is on PATH"),
             },
-            other => bail!("unknown builder `{other}`: expected `auto`, `rune` or `cargo`"),
+            other => bail!("unknown builder `{other}`: expected `auto`, `igl` or `cargo`"),
         }
     }
 
@@ -57,12 +57,12 @@ impl Builder {
         cmd
     }
 
-    /// The builder's arguments for `subcommand` on `target`. Rune links with its own hyprlnk
+    /// The builder's arguments for `subcommand` on `target`. Igel links with its own hyprlnk
     /// where hyprlnk links the target, unless `prefer_hyprlnk` is off; Cargo gets its linker
     /// through the environment.
     pub fn args(&self, subcommand: &str, target: &str, prefer_hyprlnk: bool) -> Vec<String> {
         let mut args = Vec::new();
-        if self.kind == BuilderKind::Rune && !prefer_hyprlnk {
+        if self.kind == BuilderKind::Igel && !prefer_hyprlnk {
             args.extend([
                 "--config".to_string(),
                 "build.linker=\"default\"".to_string(),
@@ -116,17 +116,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn rune_is_told_to_keep_its_default_linker_only_when_asked() {
-        let rune = Builder {
-            kind: BuilderKind::Rune,
-            path: "rune".into(),
+    fn igel_is_told_to_keep_its_default_linker_only_when_asked() {
+        let igl = Builder {
+            kind: BuilderKind::Igel,
+            path: "igl".into(),
         };
         assert_eq!(
-            rune.args("build", "aarch64-unknown-linux-gnu", true),
+            igl.args("build", "aarch64-unknown-linux-gnu", true),
             ["build", "--target", "aarch64-unknown-linux-gnu"]
         );
         assert_eq!(
-            rune.args("test", "x", false),
+            igl.args("test", "x", false),
             [
                 "--config",
                 "build.linker=\"default\"",
@@ -136,9 +136,9 @@ mod tests {
             ]
         );
         assert_eq!(
-            rune.args("clean", "x", true),
+            igl.args("clean", "x", true),
             ["clean"],
-            "rune clean takes no target"
+            "igl clean takes no target"
         );
         let cargo = Builder {
             kind: BuilderKind::Cargo,

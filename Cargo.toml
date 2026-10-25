@@ -5,14 +5,14 @@ edition = "2024"
 
 license = "MIT OR Apache-2.0"
 rust-version = "1.89"
-authors = ["Jonas <me@byjonas.dev>", "The Rune Project Developers"]
-description = "Cross-compile and cross-test Rust with Rune or Cargo: on the host when it can, in warm containers when it can't, linking with hyprlnk"
+authors = ["Jonas <me@byjonas.dev>", "The Igel Project Developers"]
+description = "Cross-compile and cross-test Rust with Igel or Cargo: on the host when it can, in warm containers when it can't, linking with hyprlnk"
 repository = "https://github.com/runepm/hyprcross"
 homepage = "https://runepm.com"
 documentation = "https://docs.rs/hyprcross"
 readme = "README.md"
 exclude = ["/docker", "/benches", "/.github"]
-keywords = ["cross", "cross-compilation", "hyprlnk", "rune", "qemu"]
+keywords = ["cross", "cross-compilation", "hyprlnk", "igl", "qemu"]
 categories = ["development-tools::build-utils", "command-line-utilities"]
 default-run = "hyprcross"
 

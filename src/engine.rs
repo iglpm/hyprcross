@@ -159,10 +159,10 @@ pub fn init_project(target: Option<&str>) -> Result<()> {
 # "direct" runs cross-compilation directly on host with target SDKs.
 engine = "direct"
 
-# "hyprlnk", the linker built into hyprcross and Rune, or "default".
+# "hyprlnk", the linker built into hyprcross and Igel, or "default".
 linker = "hyprlnk"
 
-# "auto" (Rune if it is installed, else Cargo), "rune" or "cargo".
+# "auto" (Igel if it is installed, else Cargo), "igl" or "cargo".
 builder = "auto"
 
 # The target when --target is left out.

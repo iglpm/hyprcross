@@ -1,6 +1,6 @@
 # cargo-hyprcross
 
-Cargo subcommand for [hyprcross](https://crates.io/crates/hyprcross): cross-compile and cross-test Rust with Rune or Cargo.
+Cargo subcommand for [hyprcross](https://crates.io/crates/hyprcross): cross-compile and cross-test Rust with Igel or Cargo.
 
 ## Installation
 

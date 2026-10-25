@@ -1,4 +1,4 @@
-//! `hyprcross help`: a grouped overview in Rune's layout, and clap's help in Rune's colours.
+//! `hyprcross help`: a grouped overview in Igel's layout, and clap's help in Igel's colours.
 
 use crate::ui;
 use colored::Colorize;
@@ -99,7 +99,7 @@ fn overview() {
     let (version, about) = if host == "hyprcross" {
         (
             crate::VERSION.to_string(),
-            "cross-compile and cross-test Rust, with Rune or Cargo",
+            "cross-compile and cross-test Rust, with Igel or Cargo",
         )
     } else {
         (
@@ -143,7 +143,7 @@ fn overview() {
             "-t, --target <triple>",
             "Target to build for (else the default target)",
         ),
-        ("--builder <tool>", "auto, rune or cargo"),
+        ("--builder <tool>", "auto, igl or cargo"),
         ("--linker <linker>", "hyprlnk or default"),
         ("-q, --quiet", "Only print errors"),
         ("-v, --verbose", "Print the commands it runs"),

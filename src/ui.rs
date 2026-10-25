@@ -1,4 +1,4 @@
-//! Output styling, shared with Rune: a violet `▸` for what hyprcross does, `✓` when it is done,
+//! Output styling, shared with Igel: a violet `▸` for what hyprcross does, `✓` when it is done,
 //! `!` for warnings, `✗` for errors and a dimmed `note:` for what to do about them. Everything
 //! hyprcross says goes to stderr, so stdout stays the builder's and the program's.
 

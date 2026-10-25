@@ -1,4 +1,4 @@
-//! Who runs hyprcross: its own executable, or a program it is built into (Rune, as `rune cross`).
+//! Who runs hyprcross: its own executable, or a program it is built into (Igel, as `igl cross`).
 //! Messages name the command users type there, and the host can bring the builder (itself), its
 //! settings, and where those are written.
 
@@ -16,7 +16,7 @@ pub type Configure = Box<dyn Fn(&mut Config) + Send + Sync>;
 pub type Init = fn(Option<&str>) -> Result<()>;
 
 pub struct Host {
-    /// The command users type: `hyprcross`, or `rune cross`.
+    /// The command users type: `hyprcross`, or `igl cross`.
     pub command: &'static str,
     /// Where the default target is set, for hints.
     pub default_target_setting: &'static str,
@@ -24,7 +24,7 @@ pub struct Host {
     pub target_settings: &'static str,
     /// The builder, when the host is one: it runs itself.
     pub builder: Option<Builder>,
-    /// Whether the host links with a hyprlnk of its own (Rune does), for `doctor`.
+    /// Whether the host links with a hyprlnk of its own (Igel does), for `doctor`.
     pub links_with_hyprlnk: bool,
     /// The host's settings, applied over the ones hyprcross reads from its files.
     pub configure: Option<Configure>,
@@ -57,7 +57,7 @@ pub fn get() -> &'static Host {
     HOST.get_or_init(Host::standalone)
 }
 
-/// The command users type: `hyprcross`, or `rune cross`.
+/// The command users type: `hyprcross`, or `igl cross`.
 pub fn command() -> &'static str {
     get().command
 }

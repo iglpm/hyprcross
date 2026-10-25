@@ -30,7 +30,7 @@ pub struct BuildConfig {
     #[serde(default = "default_linker")]
     pub linker: String,
 
-    /// "auto", "rune" or "cargo".
+    /// "auto", "igl" or "cargo".
     #[serde(default = "default_builder")]
     pub builder: String,
 
@@ -213,7 +213,7 @@ impl Config {
     /// `[workspace.metadata.hyprcross]` (or `.cross`); then `~/.config/hyprcross/config.toml`.
     pub fn load_from_dir(dir: &Path) -> Result<Self> {
         let mut cfg = Self::load_file_from_dir(dir)?;
-        // The host's settings (Rune's `cross.*`) over the files, under HYPRCROSS_* variables.
+        // The host's settings (Igel's `cross.*`) over the files, under HYPRCROSS_* variables.
         if let Some(configure) = &crate::host::get().configure {
             configure(&mut cfg);
         }
@@ -297,7 +297,7 @@ impl Config {
         self.target.get(triple)
     }
 
-    /// Settings for `triple` from elsewhere (Rune's `[cross.target.<triple>]`) over the ones
+    /// Settings for `triple` from elsewhere (Igel's `[cross.target.<triple>]`) over the ones
     /// read from the files, field by field.
     pub fn merge_target(&mut self, triple: &str, other: TargetConfig) {
         self.target

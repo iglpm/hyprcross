@@ -83,24 +83,24 @@ pub fn run_doctor() {
         ),
     }
 
-    // The builder: the host itself (`rune cross`), else Rune or Cargo on PATH.
+    // The builder: the host itself (`igl cross`), else Igel or Cargo on PATH.
     let host = crate::host::get();
     match host
         .builder
         .as_ref()
         .map(|b| b.path.clone())
-        .or_else(|| find_executable("rune"))
+        .or_else(|| find_executable("igl"))
     {
-        Some(rune) => {
-            let v = version_of(&rune).unwrap_or_else(|| "rune".into());
+        Some(igl) => {
+            let v = version_of(&igl).unwrap_or_else(|| "igl".into());
             r.ok(format!(
                 "{v} builds {}",
                 ui::dim("(content-addressed cache)")
             ));
-            if rune.to_string_lossy().contains("/target/debug/") {
+            if igl.to_string_lossy().contains("/target/debug/") {
                 r.problem(
-                    format!("the rune on PATH is a debug build: {}", ui::tilde(&rune)),
-                    "debug builds of rune are several times slower, cached builds included; \
+                    format!("the igl on PATH is a debug build: {}", ui::tilde(&igl)),
+                    "debug builds of igl are several times slower, cached builds included; \
                      put a release build (target/release) first on PATH",
                 );
             }
@@ -109,10 +109,10 @@ pub fn run_doctor() {
             Some(cargo) => r.ok(format!(
                 "{} builds {}",
                 version_of(&cargo).unwrap_or_else(|| "cargo".into()),
-                ui::dim("(install Rune for content-addressed build cache)")
+                ui::dim("(install Igel for content-addressed build cache)")
             )),
             None => r.problem(
-                "neither rune nor cargo is on PATH",
+                "neither igl nor cargo is on PATH",
                 "install Rust with rustup: https://rustup.rs",
             ),
         },

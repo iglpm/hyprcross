@@ -1,4 +1,4 @@
-//! hyprlnk, the linker built into hyprcross. Rune links with its own copy and needs nothing from
+//! hyprlnk, the linker built into hyprcross. Igel links with its own copy and needs nothing from
 //! here; Cargo gets this executable as the target's linker, under the name `hyprlnk`.
 //!
 //! The executable links instead of running the CLI when it is started

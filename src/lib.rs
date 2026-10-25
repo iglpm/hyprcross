@@ -1,4 +1,4 @@
-//! hyprcross: cross-compile and cross-test Rust, with Rune or Cargo natively on the host,
+//! hyprcross: cross-compile and cross-test Rust, with Igel or Cargo natively on the host,
 //! linking with hyprlnk.
 
 pub mod builder;
@@ -49,8 +49,8 @@ pub fn run() -> Result<i32> {
     dispatch(args)
 }
 
-/// Run hyprcross inside another program (`rune cross`): `args` as hyprcross would get them,
-/// the first one naming the command (`rune cross`); the exit code.
+/// Run hyprcross inside another program (`igl cross`): `args` as hyprcross would get them,
+/// the first one naming the command (`igl cross`); the exit code.
 pub fn run_hosted(args: Vec<OsString>, host: host::Host) -> Result<i32> {
     host::set(host);
     dispatch(args)

@@ -123,7 +123,7 @@ Keep it: deleting it makes the next run rebuild the musl toolchains from source.
 
 The three repositories depend on each other, so push them in this order:
 
-1. **hyprlnk** first: commit its fixes (in Rune's `hyprlnk/`) and push. The image smoke tests
+1. **hyprlnk** first: commit its fixes (in Igel's `hyprlnk/`) and push. The image smoke tests
    for ARM glibc and dynamically linked musl need them (`.tbss` layout, `.eh_frame` symbols).
 2. **Move hyprcross' submodule to that commit**: it is pinned to `821a194`, from before them.
 
@@ -136,7 +136,7 @@ The three repositories depend on each other, so push them in this order:
    30 images. The first Images run is the slow one: seven musl toolchains are built from
    source (10–15 minutes each, in parallel); later runs reuse them from the registry cache.
    Then do step 4.2 and 4.3.
-4. **rune**: its changes (`rune-cas`, `rune-common`, `rune-scheduler`; hyprcross moved from
+4. **igl**: its changes (`igel-cas`, `igel-common`, `igel-scheduler`; hyprcross moved from
    its workspace's members to `exclude`) and the new submodule commits of `hyprlnk` and
    `hyprcross`.
 

@@ -21,7 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Android (aarch64, armv7, x86_64, i686)
   - FreeBSD (x86_64)
   - Apple macOS (aarch64, x86_64)
-- **Rune-Aligned Progress Bar UI**: Replaced generic download/spinner outputs with styled progress bars and spinners matching `rune_scheduler` (`━╾─` characters, braille spinners, violet brand accents).
+- **Igel-Aligned Progress Bar UI**: Replaced generic download/spinner outputs with styled progress bars and spinners matching `igel_scheduler` (`━╾─` characters, braille spinners, violet brand accents).
 - **Universal Clang/LLD Linker Driver Fallback**: For all non-host targets when no host-native cross GCC compiler is detected (e.g. `aarch64-linux-gnu-gcc`), `hyprcross` automatically configures `clang` as the linker driver and sets `-fuse-ld=lld` along with normalized target triples (e.g. `riscv64-unknown-linux-*`, `x86_64-w64-mingw32`, `x86_64-w64-windows-gnu`).
 - **Comprehensive Target Sysroot Resolution**: Added automated library search path injection (`-L<sdk>/usr/lib`, `-L<sdk>/lib`, and `-L<sdk>/usr/lib/21` for Android) across Linux GNU, Linux musl, Android, FreeBSD, and Windows targets.
 
@@ -54,7 +54,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   sent over a Unix socket, on a pseudo-terminal when the output is a terminal. A warm build
   starts no `podman` or `docker` process: 41 ms for a fully cached build of hyprcross in a
   container, against 149 ms through `podman exec`.
-- Built into Rune as `rune cross` and `--cross`: `run_hosted` runs hyprcross inside another
+- Built into Igel as `igl cross` and `--cross`: `run_hosted` runs hyprcross inside another
   program, which names the command in messages and help, brings itself as the builder, and
   applies its settings over hyprcross' files (`host::Host`). Without the `builtin-hyprlnk`
   feature it brings no hyprlnk of its own, for hosts that link with theirs.
@@ -69,19 +69,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - hyprlnk is a submodule (`hyprlnk/`, pinned to one commit) instead of a repository expected
   next to hyprcross: `git clone --recursive` is all a build needs. Dependabot proposes newer
   hyprlnk commits, and their pull requests smoke-test every image.
-- Output in Rune's style: `▸` for what happens, `✓`, `!` and `✗`, `note:` hints, spinners for
+- Output in Igel's style: `▸` for what happens, `✓`, `!` and `✗`, `note:` hints, spinners for
   pulls and container starts, a grouped `help`, and a `doctor` that lists what to fix (a debug
-  build of `rune` on PATH, for one).
+  build of `igl` on PATH, for one).
 - Containers mount the project (its workspace root), its path dependencies, `CARGO_HOME`,
-  `RUSTUP_HOME` and `RUNE_HOME` at their host paths: errors show host paths and Rune's cache is
+  `RUSTUP_HOME` and `IGEL_HOME` at their host paths: errors show host paths and Igel's cache is
   shared with host builds. They run with the image's own `PATH`, extended.
 - Warm containers are replaced when what they were made from changes (image, mounts, a rebuilt
-  `rune` or `hyprcross`, `pre_build`), and stop after `idle_timeout_mins` without a build. Their
+  `igl` or `hyprcross`, `pre_build`), and stop after `idle_timeout_mins` without a build. Their
   names include a hash of the project's path, so projects in directories of the same name no
   longer share one.
 - `engine = "auto"` builds on the host when the target's C cross compiler is installed, and in
   a container otherwise; musl targets no longer always build on the host.
-- With Rune, hyprcross passes no linker flags: Rune links with its own hyprlnk, through the
+- With Igel, hyprcross passes no linker flags: Igel links with its own hyprlnk, through the
   image's C compiler. With Cargo, hyprcross is the linker under the name `hyprlnk`.
 - Direct builds name the target's C cross compiler as its linker, and find QEMU's sysroot where
   distributions install it (`/usr/aarch64-linux-gnu`).
@@ -94,10 +94,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - Builds linked through hyprlnk failed: `-C link-arg=__hyprlnk` ended up last on the link line
   ("cannot open __hyprlnk").
-- Container builds with Rune failed to link host build scripts ("unrecognized command-line
+- Container builds with Igel failed to link host build scripts ("unrecognized command-line
   option '-m64'"): the target's `HYPRLNK_CC` was set for the whole container.
-- Running a build through hyprcross and then through `rune` rebuilt everything: hyprcross'
-  `RUSTFLAGS` changed Rune's cache keys.
+- Running a build through hyprcross and then through `igl` rebuilt everything: hyprcross'
+  `RUSTFLAGS` changed Igel's cache keys.
 - `pre_build` was never run.
 - Wine failed in images built with rootless Podman (`mkdir /run/user/1000/wine: Permission
   denied`).
@@ -112,7 +112,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **hyprlnk Linker Acceleration**: Built-in 2x-4x faster linking on Linux ELF (x86_64, aarch64, armv7, riscv64, powerpc64le, s390x), Windows PE/COFF, and macOS Mach-O.
 - **Zero-Container Direct Mode**: Direct compilation for musl, bare-metal, and native cross targets without starting any container.
 - **Persistent Container Daemon**: Background warm container pool executing commands in ~20ms via `exec`, eliminating container startup latency.
-- **Dual Builder Support**: Native integration with `rune` (content-addressable caching, pipelined compilation) with seamless fallback to `cargo`.
+- **Dual Builder Support**: Native integration with `igl` (content-addressable caching, pipelined compilation) with seamless fallback to `cargo`.
 - **QEMU Emulation & Cross-Testing**: Transparent test runner configuration with automatic `QEMU_LD_PREFIX` sysroot dynamic linker setup and kernel `binfmt_misc` integration.
 - **Configuration Compatibility**: Drop-in support for existing `Cross.toml` and `Cargo.toml [package.metadata.cross]`, extended with `Hyprcross.toml`.
 - **Diagnostic Suite**: `hyprcross doctor` command verifying host toolchains, container runtimes, QEMU emulators, binfmt_misc status, and installed targets.
