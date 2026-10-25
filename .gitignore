@@ -1,5 +1,5 @@
-/target
-/.igel/
+target
+.igel/
 Igel.lock.bin
 **/*.rs.bk
 *.orig
