@@ -40,7 +40,15 @@ impl QemuRunner {
 
     pub fn runner_command(&self) -> String {
         match &self.ld_prefix {
-            Some(prefix) => format!("{} -L {}", self.binary.display(), prefix.display()),
+            Some(prefix) => format!(
+                "{} -L {} -E LD_LIBRARY_PATH={}/lib:{}/usr/lib:{}/lib64:{}/usr/lib64",
+                self.binary.display(),
+                prefix.display(),
+                prefix.display(),
+                prefix.display(),
+                prefix.display(),
+                prefix.display()
+            ),
             None => self.binary.display().to_string(),
         }
     }
@@ -100,6 +108,15 @@ fn resolve_sysroot_prefix(target: &TargetInfo, custom: Option<&Path>) -> Option<
     if let Some(p) = custom
         && p.exists()
     {
+        // Published SDKs flatten cross-distribution /usr/<triple>/lib into usr/lib.
+        // Older packages have an empty top-level lib; use usr as QEMU's prefix only
+        // when it actually contains the interpreter this target will request.
+        if let Some(loader) = target.dynamic_linker() {
+            let loader = loader.trim_start_matches('/');
+            if !p.join(loader).is_file() && p.join("usr").join(loader).is_file() {
+                return Some(p.join("usr"));
+            }
+        }
         return Some(p.to_path_buf());
     }
     let mut candidates = Vec::new();
@@ -109,4 +126,28 @@ fn resolve_sysroot_prefix(target: &TargetInfo, custom: Option<&Path>) -> Option<
     }
     candidates.push(PathBuf::from(format!("/usr/{}", target.triple)));
     candidates.into_iter().find(|p| p.join("lib").is_dir())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn flattened_sdk_uses_the_prefix_containing_its_loader() {
+        let dir = tempfile::tempdir().unwrap();
+        let sdk = dir.path();
+        std::fs::create_dir_all(sdk.join("usr/lib")).unwrap();
+        std::fs::create_dir(sdk.join("lib")).unwrap();
+        std::fs::write(sdk.join("usr/lib/ld-linux.so.3"), b"loader").unwrap();
+        let target = TargetInfo::parse("arm-unknown-linux-gnueabi");
+        assert_eq!(
+            resolve_sysroot_prefix(&target, Some(sdk)),
+            Some(sdk.join("usr"))
+        );
+        std::fs::write(sdk.join("lib/ld-linux.so.3"), b"loader").unwrap();
+        assert_eq!(
+            resolve_sysroot_prefix(&target, Some(sdk)),
+            Some(sdk.to_path_buf())
+        );
+    }
 }

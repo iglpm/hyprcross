@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use crate::builder::find_executable;
-use crate::targets::{TargetEnv, TargetInfo, TargetOs};
+use crate::targets::{TargetInfo, TargetOs};
 use crate::ui;
 
 pub const DEFAULT_SDK_REPO: &str = "https://github.com/runepm/sdks/releases/download/v2027.0.3";
@@ -354,10 +354,7 @@ pub fn target_needs_sdk(target: &TargetInfo) -> bool {
     if target.is_host() || target.links_without_c_toolchain() {
         return false;
     }
-    // Musl targets have self-contained libc.a and startup files in rustup toolchain on Linux hosts
-    if cfg!(target_os = "linux") && target.env == TargetEnv::Musl && target.arch_matches_host() {
-        return false;
-    }
+    // Even same-architecture musl needs SDK headers for C/C++ build scripts.
     // Bare metal & wasm don't need external SDKs
     if target.os == TargetOs::None || target.os == TargetOs::Wasi {
         return false;

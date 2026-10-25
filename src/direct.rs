@@ -75,7 +75,7 @@ impl<'a> DirectEngine<'a> {
         cmd.args(extra_args);
 
         // Without a linker named for it, rustc links a cross target with the host's `cc`, which
-        // can't. Name the target's C compiler: Rune makes it hyprlnk's driver, Cargo runs it.
+        // can't. Name the target's C compiler: Igel makes it hyprlnk's driver, Cargo runs it.
         let driver = (!self.target.is_host())
             .then(|| host_c_compiler(self.target))
             .flatten();
@@ -96,6 +96,20 @@ impl<'a> DirectEngine<'a> {
             }
         }
 
+        let clang_target = match triple.as_str() {
+            "x86_64-pc-windows-gnu" => "x86_64-w64-mingw32",
+            "i686-pc-windows-gnu" => "i686-w64-mingw32",
+            "x86_64-pc-windows-gnullvm" => "x86_64-w64-windows-gnu",
+            "aarch64-pc-windows-gnullvm" => "aarch64-w64-windows-gnu",
+            "x86_64-unknown-freebsd" => "x86_64-unknown-freebsd14.0",
+            "riscv64gc-unknown-linux-musl" => "riscv64-unknown-linux-musl",
+            "riscv64gc-unknown-linux-gnu" => "riscv64-unknown-linux-gnu",
+            "powerpc64le-unknown-linux-musl" => "powerpc64le-unknown-linux-musl",
+            "armv7-unknown-linux-musleabihf" => "armv7-linux-musleabihf",
+            "arm-unknown-linux-musleabihf" => "arm-linux-musleabihf",
+            _ => triple.as_str(),
+        };
+
         // Ensure the target SDK is available for linking
         let maybe_sdk = if subcommand != "clean" {
             crate::sdk::ensure_sdk(self.target)?
@@ -114,11 +128,28 @@ impl<'a> DirectEngine<'a> {
             let triple_underscore = triple.replace(['-', '.'], "_");
             if let Some(clang) = find_executable("clang") {
                 let clang_path = clang.display().to_string();
-                let cflags = if self.target.os == crate::targets::TargetOs::MacOS {
-                    format!("--target={triple} -isysroot {}", sdk.display())
+                let mut cflags = if self.target.os == crate::targets::TargetOs::MacOS {
+                    format!("--target={clang_target} -isysroot {}", sdk.display())
                 } else {
-                    format!("--target={triple} --sysroot={}", sdk.display())
+                    format!("--target={clang_target} --sysroot={}", sdk.display())
                 };
+
+                if self.target.os == crate::targets::TargetOs::Windows {
+                    // Clang's Windows drivers do not infer a flattened SDK's include paths.
+                    for sub in [
+                        "usr/include",
+                        "include",
+                        "crt/include",
+                        "sdk/include/ucrt",
+                        "sdk/include/shared",
+                        "sdk/include/um",
+                    ] {
+                        let include = sdk.join(sub);
+                        if include.is_dir() {
+                            cflags.push_str(&format!(" -isystem {}", include.display()));
+                        }
+                    }
+                }
 
                 cmd.env(format!("CC_{triple}"), &clang_path);
                 cmd.env(format!("CC_{triple_underscore}"), &clang_path);
@@ -162,11 +193,16 @@ impl<'a> DirectEngine<'a> {
         let mut rustc_flags = Vec::new();
         if hyprlnk
             && self.builder.kind == BuilderKind::Cargo
-            && let Some(flavor) = hyprlnk_driver::rustc_linker_flavor(triple)
+            && let Some(flavor) =
+                sdk_linker_flavor(self.target, maybe_sdk.is_some(), driver.is_some())
         {
             rustc_flags.push(format!("-C linker-flavor={flavor}"));
         }
         if let Some(sdk) = &maybe_sdk {
+            if hyprlnk && let Some(loader) = self.target.dynamic_linker() {
+                // hyprlnk's default is architecture-specific, but not libc/float-ABI-specific.
+                rustc_flags.push(format!("-C link-arg=--dynamic-linker={loader}"));
+            }
             if self.target.os == crate::targets::TargetOs::MacOS {
                 rustc_flags.push(format!(
                     "-C link-arg=-syslibroot -C link-arg={}",
@@ -236,25 +272,28 @@ impl<'a> DirectEngine<'a> {
             }
         }
 
-        let clang_target = match triple.as_str() {
-            "x86_64-pc-windows-gnu" => "x86_64-w64-mingw32",
-            "i686-pc-windows-gnu" => "i686-w64-mingw32",
-            "x86_64-pc-windows-gnullvm" => "x86_64-w64-windows-gnu",
-            "aarch64-pc-windows-gnullvm" => "aarch64-w64-windows-gnu",
-            "x86_64-unknown-freebsd" => "x86_64-unknown-freebsd14.0",
-            "riscv64gc-unknown-linux-musl" => "riscv64-unknown-linux-musl",
-            "riscv64gc-unknown-linux-gnu" => "riscv64-unknown-linux-gnu",
-            "powerpc64le-unknown-linux-musl" => "powerpc64le-unknown-linux-musl",
-            "armv7-unknown-linux-musleabihf" => "armv7-linux-musleabihf",
-            "arm-unknown-linux-musleabihf" => "arm-linux-musleabihf",
-            _ => triple.as_str(),
-        };
-
         if fallback_clang.is_some() {
             rustc_flags.push(format!("-C link-arg=--target={clang_target}"));
             rustc_flags.push("-C link-arg=-Wno-unused-command-line-argument".to_string());
             if self.target.lld_supported() {
                 rustc_flags.push("-C link-arg=-fuse-ld=lld".to_string());
+            } else if let Some(ld) = self
+                .target
+                .tool_prefix()
+                .and_then(|prefix| find_executable(&format!("{prefix}-ld")))
+            {
+                rustc_flags.push(format!("-C link-arg=--ld-path={}", ld.display()));
+                if let Some(sdk) = &maybe_sdk {
+                    rustc_flags.push(format!(
+                        "-C link-arg=-Wl,-rpath-link,{}",
+                        sdk.join("usr/lib").display()
+                    ));
+                }
+            } else {
+                anyhow::bail!(
+                    "{triple} requires GNU binutils: install {}-ld (or configure a target C compiler with CARGO_TARGET_{key}_LINKER)",
+                    self.target.tool_prefix().unwrap_or_default()
+                );
             }
         }
         if !rustc_flags.is_empty() {
@@ -304,9 +343,37 @@ impl<'a> DirectEngine<'a> {
     }
 }
 
+/// An SDK supplies the startup files itself. Without a target C compiler, invoking the
+/// host's cc would select host startup objects before hyprlnk sees the target inputs.
+fn sdk_linker_flavor(target: &TargetInfo, has_sdk: bool, has_driver: bool) -> Option<&'static str> {
+    if has_sdk && !has_driver && target.os == crate::targets::TargetOs::Linux {
+        Some("ld.lld")
+    } else {
+        hyprlnk_driver::rustc_linker_flavor(&target.triple)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cross_sdk_links_without_the_host_c_runtime() {
+        let target = TargetInfo::parse("aarch64-unknown-linux-gnu");
+        assert_eq!(sdk_linker_flavor(&target, true, false), Some("ld.lld"));
+        assert_eq!(
+            sdk_linker_flavor(&target, true, true),
+            hyprlnk_driver::rustc_linker_flavor(&target.triple)
+        );
+        assert_eq!(
+            sdk_linker_flavor(&target, false, false),
+            hyprlnk_driver::rustc_linker_flavor(&target.triple)
+        );
+        let apple = TargetInfo::parse("aarch64-apple-darwin");
+        assert_eq!(sdk_linker_flavor(&apple, true, false), Some("ld64.lld"));
+        let windows = TargetInfo::parse("aarch64-pc-windows-msvc");
+        assert_eq!(sdk_linker_flavor(&windows, true, false), None);
+    }
 
     #[test]
     fn env_keys() {
@@ -321,11 +388,11 @@ mod tests {
     }
 
     #[test]
-    fn rune_gets_no_linker_flags_from_hyprcross() {
+    fn igel_gets_no_linker_flags_from_hyprcross() {
         let target = TargetInfo::parse(crate::targets::current_host_triple());
         let builder = Builder {
-            kind: BuilderKind::Rune,
-            path: "rune".into(),
+            kind: BuilderKind::Igel,
+            path: "igl".into(),
         };
         let config = Config::default();
         let engine = DirectEngine::new(&target, &config, &builder, true);
@@ -338,7 +405,7 @@ mod tests {
             !envs
                 .iter()
                 .any(|k| k == "RUSTFLAGS" || k.ends_with("_RUSTFLAGS") || k.ends_with("_LINKER")),
-            "Rune links with its own hyprlnk and keeps its cache: {envs:?}"
+            "Igel links with its own hyprlnk and keeps its cache: {envs:?}"
         );
     }
 }

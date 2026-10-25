@@ -344,6 +344,44 @@ impl TargetInfo {
         matches!(self.os, TargetOs::None | TargetOs::Wasi)
     }
 
+    /// Linux's ELF interpreter depends on both the architecture and the libc ABI.
+    pub fn dynamic_linker(&self) -> Option<&'static str> {
+        if self.os != TargetOs::Linux {
+            return None;
+        }
+        if self.env == TargetEnv::Musl {
+            return Some(match self.arch {
+                TargetArch::X86_64 => "/lib/ld-musl-x86_64.so.1",
+                TargetArch::X86 => "/lib/ld-musl-i386.so.1",
+                TargetArch::Aarch64 => "/lib/ld-musl-aarch64.so.1",
+                TargetArch::Arm | TargetArch::Armv7 if self.triple.ends_with("hf") => {
+                    "/lib/ld-musl-armhf.so.1"
+                }
+                TargetArch::Arm | TargetArch::Armv7 => "/lib/ld-musl-arm.so.1",
+                TargetArch::Riscv64 => "/lib/ld-musl-riscv64.so.1",
+                TargetArch::Powerpc64le => "/lib/ld-musl-powerpc64le.so.1",
+                _ => return None,
+            });
+        }
+        Some(match self.arch {
+            TargetArch::X86_64 => "/lib64/ld-linux-x86-64.so.2",
+            TargetArch::X86 => "/lib/ld-linux.so.2",
+            TargetArch::Aarch64 => "/lib/ld-linux-aarch64.so.1",
+            TargetArch::Arm | TargetArch::Armv7 if self.triple.ends_with("hf") => {
+                "/lib/ld-linux-armhf.so.3"
+            }
+            TargetArch::Arm | TargetArch::Armv7 => "/lib/ld-linux.so.3",
+            TargetArch::Riscv64 => "/lib/ld-linux-riscv64-lp64d.so.1",
+            TargetArch::Powerpc64le => "/lib64/ld64.so.2",
+            TargetArch::Powerpc64 => "/lib64/ld64.so.1",
+            TargetArch::Powerpc => "/lib/ld.so.1",
+            TargetArch::S390x => "/lib/ld64.so.1",
+            TargetArch::Sparc64 => "/lib64/ld-linux.so.2",
+            TargetArch::Loongarch64 => "/lib64/ld-linux-loongarch-lp64d.so.1",
+            _ => return None,
+        })
+    }
+
     /// What runs this target's programs, here on the host.
     pub fn host_runner(&self) -> Runner {
         if self.is_host()
