@@ -168,10 +168,10 @@ fn overview() {
 
 pub fn styles() -> clap::builder::Styles {
     use clap::builder::styling::{Ansi256Color, AnsiColor, Color, Style};
-    let violet = Some(Color::Ansi256(Ansi256Color(141)));
+    let quill = Some(Color::Ansi256(Ansi256Color(179)));
     clap::builder::Styles::styled()
-        .header(Style::new().bold().fg_color(violet))
-        .usage(Style::new().bold().fg_color(violet))
+        .header(Style::new().bold().fg_color(quill))
+        .usage(Style::new().bold().fg_color(quill))
         .literal(Style::new().bold())
         .placeholder(Style::new().dimmed())
         .valid(Style::new().fg_color(Some(Color::Ansi(AnsiColor::Green))))
@@ -188,7 +188,7 @@ pub fn examples(rows: &[(&str, &str)]) -> String {
     use clap::builder::styling::{Ansi256Color, Color, Style};
     let header = Style::new()
         .bold()
-        .fg_color(Some(Color::Ansi256(Ansi256Color(141))));
+        .fg_color(Some(Color::Ansi256(Ansi256Color(179))));
     let literal = Style::new().bold();
     let rows: Vec<(String, &str)> = rows
         .iter()

@@ -1,4 +1,4 @@
-//! Output styling, shared with Igel: a violet `▸` for what hyprcross does, `✓` when it is done,
+//! Output styling, shared with Igel: a warm quill-coloured `▸` for work, `✓` when it is done,
 //! `!` for warnings, `✗` for errors and a dimmed `note:` for what to do about them. Everything
 //! hyprcross says goes to stderr, so stdout stays the builder's and the program's.
 
@@ -45,7 +45,7 @@ pub fn colors() -> bool {
     colored::control::SHOULD_COLORIZE.should_colorize()
 }
 
-/// Without 24-bit colour, violet is sent as its 256-colour neighbour rather than rounded to blue.
+/// Without 24-bit colour, the logo's warm quill colour uses its closest 256-colour neighbour.
 fn truecolor() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
     *ON.get_or_init(|| {
@@ -53,15 +53,15 @@ fn truecolor() -> bool {
     })
 }
 
-/// The brand colour: bold violet.
+/// The brand colour: the warm quill colour from Igel's logo.
 pub fn brand(s: impl Display) -> String {
     if !colors() {
         return s.to_string();
     }
     if truecolor() {
-        format!("\x1b[1;38;2;167;139;250m{s}\x1b[0m")
+        format!("\x1b[1;38;2;215;154;98m{s}\x1b[0m")
     } else {
-        format!("\x1b[1;38;5;141m{s}\x1b[0m")
+        format!("\x1b[1;38;5;179m{s}\x1b[0m")
     }
 }
 
@@ -271,7 +271,7 @@ pub fn tilde(path: &std::path::Path) -> String {
 fn spinner_style() -> ProgressStyle {
     ProgressStyle::default_spinner()
         .tick_chars("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏ ")
-        .template("{spinner:.141} {prefix:.141.bold} {wide_msg:.dim}")
+        .template("{spinner:.179} {prefix:.179.bold} {wide_msg:.dim}")
         .expect("valid template")
 }
 
@@ -345,7 +345,7 @@ pub fn bar_width() -> usize {
 pub fn bar_style(width: usize) -> ProgressStyle {
     ProgressStyle::default_bar()
         .template(&format!(
-            "{{spinner:.141}} {{prefix:.141.bold}} {{bar:{width}.141/238}} {{pos}}/{{len}} {{wide_msg:.dim}}"
+            "{{spinner:.179}} {{prefix:.179.bold}} {{bar:{width}.179/238}} {{pos}}/{{len}} {{wide_msg:.dim}}"
         ))
         .expect("valid template")
         .tick_chars("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏ ")
