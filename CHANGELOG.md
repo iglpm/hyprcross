@@ -21,7 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Android (aarch64, armv7, x86_64, i686)
   - FreeBSD (x86_64)
   - Apple macOS (aarch64, x86_64)
-- **Igel-Aligned Progress Bar UI**: Replaced generic download/spinner outputs with styled progress bars and spinners matching `igel_scheduler` (`━╾─` characters, braille spinners, violet brand accents).
+- **Igel-Aligned Progress Bar UI**: Replaced generic download/spinner outputs with styled progress bars and spinners matching `igel_scheduler` (`━╾─` characters, braille spinners, warm quill accents).
 - **Universal Clang/LLD Linker Driver Fallback**: For all non-host targets when no host-native cross GCC compiler is detected (e.g. `aarch64-linux-gnu-gcc`), `hyprcross` automatically configures `clang` as the linker driver and sets `-fuse-ld=lld` along with normalized target triples (e.g. `riscv64-unknown-linux-*`, `x86_64-w64-mingw32`, `x86_64-w64-windows-gnu`).
 - **Comprehensive Target Sysroot Resolution**: Added automated library search path injection (`-L<sdk>/usr/lib`, `-L<sdk>/lib`, and `-L<sdk>/usr/lib/21` for Android) across Linux GNU, Linux musl, Android, FreeBSD, and Windows targets.
 
