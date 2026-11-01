@@ -31,7 +31,7 @@ jobs:
           git config --global url."https://x-access-token:${TOKEN}@github.com/".insteadOf "https://github.com/"
 
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           token: ${{ secrets.RUNIFIED_TOKEN || secrets.HYPRLNK_TOKEN || github.token }}
 
