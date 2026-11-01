@@ -38,7 +38,7 @@ jobs:
           git config --global url."https://x-access-token:${TOKEN}@github.com/".insteadOf "https://github.com/"
 
       # hyprlnk, which hyprcross links with, is a submodule.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           submodules: recursive
           token: ${{ secrets.RUNIFIED_TOKEN || secrets.HYPRLNK_TOKEN || github.token }}
